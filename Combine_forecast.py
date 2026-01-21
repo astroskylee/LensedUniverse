@@ -16,6 +16,7 @@ from jax import random
 from SLCOSMO import SLCOSMO, SLmodel, tool
 
 TEST_MODE = os.environ.get("COMBINE_FORECAST_TEST") == "1"
+DATA_DIR = os.environ.get("SLCOSMO_DATA_DIR", os.path.join("..", "slcosmo"))
 OTHER_FORECAST_DIR = os.environ.get("OTHER_FORECAST_DIR", os.path.join("..", "SLCOSMO", "other_forecast"))
 
 jax.config.update("jax_enable_x64", True)
@@ -66,7 +67,7 @@ cosmo_prior = {
 cosmo_true = {"Omegam": 0.32, "Omegak": 0.0, "w0": -1.0, "wa": 0.0, "h0": 70.0}
 
 # %% 1) DSPL mock data (β + σ_v)  + 60% photo-z on zs2
-data_dspl = np.loadtxt("EuclidDSPLs_1.txt")
+data_dspl = np.loadtxt(os.path.join(DATA_DIR, "EuclidDSPLs_1.txt"))
 data_dspl = data_dspl[(data_dspl[:, 5] < 0.95)]
 
 zl_dspl  = data_dspl[:, 0]
@@ -158,7 +159,7 @@ dspl_data = {
 
 photo_z = True
 # %% 2) Lens+kin mock data (E, γ, β_aniso, σ_v)
-LUT = np.load("velocity_disp_table.npy")
+LUT = np.load(os.path.join(DATA_DIR, "velocity_disp_table.npy"))
 N1, N2, N3, N4 = LUT.shape
 thetaE_grid = np.linspace(0.5, 3.0, N1)
 gamma_grid  = np.linspace(1.2, 2.8, N2)
@@ -166,7 +167,7 @@ Re_grid     = np.linspace(0.15, 3.0, N3)
 beta_grid   = np.linspace(-0.5, 0.8, N4)
 jampy_interp = tool.make_4d_interpolant(thetaE_grid, gamma_grid, Re_grid, beta_grid, LUT)
 
-Euclid_GG_data = np.loadtxt("Euclid_len.txt")
+Euclid_GG_data = np.loadtxt(os.path.join(DATA_DIR, "Euclid_len.txt"))
 zl_lens = Euclid_GG_data[:, 0]
 zs_lens = Euclid_GG_data[:, 1]
 Ein_lens = Euclid_GG_data[:, 2]
@@ -215,7 +216,7 @@ lens_data = {
     "vel_err": vel_err_lens,
 }
 # %% 3) Lensed SNe mock data (Ddt + λ_int constraints)
-sn_data = pd.read_csv("Euclid_150SNe.csv")
+sn_data = pd.read_csv(os.path.join(DATA_DIR, "Euclid_150SNe.csv"))
 sn_data = sn_data[sn_data["tmax"] >= 5][sn_data["tmax"] <= 80]
 sn_data = sn_data.nlargest(70, 'tmax')
 zl_sne = np.array(sn_data["zl"])
