@@ -21,8 +21,8 @@ OTHER_FORECAST_DIR = os.environ.get("OTHER_FORECAST_DIR", os.path.join("..", "SL
 
 jax.config.update("jax_enable_x64", True)
 if TEST_MODE:
-    print("Test mode: using CPU")
-    numpyro.set_platform("cpu")
+    print("Test mode: using GPU")
+    numpyro.set_platform("gpu")
 else:
     print("GPU connected")
     numpyro.set_platform("gpu")
