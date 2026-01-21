@@ -1,0 +1,11 @@
+jax==0.8.0
+jaxlib==0.8.0
+numpy
+scipy
+pandas
+matplotlib
+corner
+arviz
+numpyro
+getdist
+astropy
