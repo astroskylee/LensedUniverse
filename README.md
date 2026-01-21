@@ -5,7 +5,7 @@ DSPL + lens-kinematics + lensed SNe pipeline.
 
 ## Contents
 - `Combine_forecast.py`: main forecasting pipeline.
-- `SLCOSMO.py` / `slcosmo/`: core models and tools (refactored).
+- `slcosmo/`: core models and tools (refactored).
 - `Combine_forecast_test.ipynb`: smoke test with reduced settings.
 - `environment_check.ipynb`: server-side environment report.
 - `data/`: input catalogs and lookup tables.

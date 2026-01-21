@@ -13,7 +13,7 @@ import numpyro.distributions as dist
 from numpyro.infer import NUTS, MCMC
 from jax import random
 
-from SLCOSMO import SLCOSMO, SLmodel, tool
+from slcosmo import SLCOSMO, SLmodel, tool
 
 TEST_MODE = os.environ.get("COMBINE_FORECAST_TEST") == "1"
 DATA_DIR = os.environ.get("SLCOSMO_DATA_DIR", os.path.join("..", "slcosmo"))
