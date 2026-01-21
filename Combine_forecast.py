@@ -217,7 +217,7 @@ lens_data = {
 }
 # %% 3) Lensed SNe mock data (Ddt + λ_int constraints)
 sn_data = pd.read_csv(os.path.join(DATA_DIR, "Euclid_150SNe.csv"))
-sn_data = sn_data[sn_data["tmax"] >= 5][sn_data["tmax"] <= 80]
+sn_data = sn_data[(sn_data["tmax"] >= 5) & (sn_data["tmax"] <= 80)]
 sn_data = sn_data.nlargest(70, 'tmax')
 zl_sne = np.array(sn_data["zl"])
 zs_sne = np.array(sn_data["z_host"])
@@ -371,7 +371,7 @@ if TEST_MODE:
     N_SNE_USE = 10
     num_warmup = 200
     num_samples = 200
-    num_chains = 1
+    num_chains = 2
     chain_method = "sequential"
 else:
     N_DSPL_USE = 1200
