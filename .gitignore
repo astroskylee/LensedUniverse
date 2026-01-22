@@ -1,0 +1,7 @@
+
+# NFS temp files (deleted but still open)
+.nfs*
+result/.nfs*
+
+# Jupyter artifacts
+.ipynb_checkpoints/
