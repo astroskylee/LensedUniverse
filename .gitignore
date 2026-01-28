@@ -5,4 +5,7 @@ result/.nfs*
 
 # Jupyter artifacts
 .ipynb_checkpoints/
-PATH/TO/BIGFILE
+result/*.nc
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
