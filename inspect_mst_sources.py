@@ -74,6 +74,10 @@ def main() -> None:
         )
         print("  bad lens idx:", bad_idx[: args.max_show].tolist())
 
+        print("  per-lens stats (mean, std, std/mean):")
+        for i in range(sig_mean.shape[0]):
+            print(f"    lens {i:03d}: mean={sig_mean[i]:.6e}, std={sig_std[i]:.6e}, ratio={mst_err[i]:.6e}")
+
     print("\nSummary:")
     print("  total nonfinite sigma_v:", total_nonfinite)
     print("  total mean_bad lenses:", total_mean_bad)
