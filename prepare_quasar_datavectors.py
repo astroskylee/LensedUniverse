@@ -8,7 +8,7 @@ Inputs:
 Outputs (flat arrays, one row per time-delay measurement):
   - z_lens, z_src
   - fpd_true, fpd_err (fractional)
-  - td_err (fractional)
+  - td_err (absolute days; 3% for blocks 0-2, 5 days otherwise)
   - sigma_v_obs
   - sigma_v_frac_err
   - mst_err (2 * sigma_v_frac_err)
@@ -16,7 +16,7 @@ Outputs (flat arrays, one row per time-delay measurement):
 
 Notes:
   - fpd stats are computed as mean/std across chain axis=1, then std/|mean|.
-  - td_err is the fractional std across chain axis=1 (std / |mean|).
+  - td_err is absolute in days: 3% for blocks 0-2, 5 days for others.
   - sigma_v_obs is inverse-variance weighted across bins, then averaged over chain.
   - sigma_v_frac_err is derived from inverse-variance errors, then averaged over chain.
   - mst_err assumes sigma_v ∝ sqrt(lambda_int) -> fractional lambda error = 2 * fractional sigma_v error.
@@ -60,7 +60,7 @@ def _flatten_block(
     z_src: np.ndarray,
     fpd_mean: np.ndarray,
     fpd_std: np.ndarray,
-    td_std: np.ndarray,
+    td_err_abs: np.ndarray,
     sigma_v_obs: np.ndarray,
     sigma_v_frac_err: np.ndarray,
     mst_std: np.ndarray,
@@ -72,7 +72,7 @@ def _flatten_block(
     z_src_flat = np.repeat(z_src, n_td)
     fpd_true_flat = fpd_mean.reshape(-1)
     fpd_err_flat = fpd_std.reshape(-1)
-    td_err_flat = td_std.reshape(-1)
+    td_err_flat = td_err_abs.reshape(-1)
     sigma_v_obs_flat = np.repeat(sigma_v_obs, n_td)
     sigma_v_frac_err_flat = np.repeat(sigma_v_frac_err, n_td)
     mst_err_flat = np.repeat(mst_std, n_td)
@@ -142,8 +142,11 @@ def main() -> None:
 
         fpd_mean, fpd_std = _mean_std(fpd_samples, axis=1, min_err=args.min_err)
         fpd_std = fpd_std / np.abs(fpd_mean)
-        td_mean, td_std = _mean_std(td_samples, axis=1, min_err=args.min_err)
-        td_std = td_std / np.abs(td_mean)
+        td_mean, _ = _mean_std(td_samples, axis=1, min_err=args.min_err)
+        if b in (0, 1, 2):
+            td_err_abs = 0.03 * np.abs(td_mean)
+        else:
+            td_err_abs = np.full_like(td_mean, 5.0)
 
         has_mst = ("sigma_v_measured" in block) and ("sigma_v_likelihood_prec" in block)
         sig_stats = _compute_sigma_v_stats(block)
@@ -163,7 +166,7 @@ def main() -> None:
             z_src=z_src,
             fpd_mean=fpd_mean,
             fpd_std=fpd_std,
-            td_std=td_std,
+            td_err_abs=td_err_abs,
             sigma_v_obs=sigma_v_obs,
             sigma_v_frac_err=sigma_v_frac_err,
             mst_std=mst_std,
