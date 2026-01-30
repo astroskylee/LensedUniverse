@@ -9,14 +9,16 @@ Outputs (flat arrays, one row per time-delay measurement):
   - z_lens, z_src
   - fpd_true, fpd_err (fractional)
   - td_err (fractional)
-  - mst_err (from sigma_v_likelihood_prec / sigma_v_measured)
+  - sigma_v_obs
+  - sigma_v_frac_err
+  - mst_err (alias of sigma_v_frac_err)
   - block_id, lens_id, pair_id
 
 Notes:
   - fpd stats are computed as mean/std across chain axis=1, then std/|mean|.
   - td_err is the fractional std across chain axis=1 (std / |mean|).
-  - mst_err is computed as mean(sigma_v_likelihood_prec / sigma_v_measured)
-    across chain axis=1, with the last axis (image-pair dimension) averaged first.
+  - sigma_v_obs is inverse-variance weighted across bins, then averaged over chain.
+  - sigma_v_frac_err is derived from inverse-variance errors, then averaged over chain.
 """
 
 from __future__ import annotations
@@ -37,16 +39,19 @@ def _mean_std(samples: np.ndarray, axis: int = 1, min_err: float = 1e-6) -> Tupl
     return mean, std
 
 
-def _compute_mst_err(block: Dict, min_err: float) -> np.ndarray | None:
+def _compute_sigma_v_stats(block: Dict) -> tuple[np.ndarray, np.ndarray] | None:
     if ("sigma_v_measured" not in block) or ("sigma_v_likelihood_prec" not in block):
         return None
 
     sig = np.asarray(block["sigma_v_measured"], dtype=float)
     prec = np.asarray(block["sigma_v_likelihood_prec"], dtype=float)
-    sig = sig.mean(axis=2)
-    prec = prec.mean(axis=2)
-    ratio = prec / sig
-    return np.mean(ratio, axis=1)
+    prec_diag = np.diagonal(prec, axis1=-2, axis2=-1)
+    wsum = np.sum(prec_diag, axis=-1)
+    sig_wmean = np.sum(prec_diag * sig, axis=-1) / wsum
+    sig_err = np.sqrt(1.0 / wsum)
+    sig_obs = np.mean(sig_wmean, axis=1)
+    sig_frac_err = np.mean(sig_err, axis=1) / sig_obs
+    return sig_obs, sig_frac_err
 
 
 def _flatten_block(
@@ -55,6 +60,8 @@ def _flatten_block(
     fpd_mean: np.ndarray,
     fpd_std: np.ndarray,
     td_std: np.ndarray,
+    sigma_v_obs: np.ndarray,
+    sigma_v_frac_err: np.ndarray,
     mst_std: np.ndarray,
     block_id: int,
 ) -> Dict[str, np.ndarray]:
@@ -65,6 +72,8 @@ def _flatten_block(
     fpd_true_flat = fpd_mean.reshape(-1)
     fpd_err_flat = fpd_std.reshape(-1)
     td_err_flat = td_std.reshape(-1)
+    sigma_v_obs_flat = np.repeat(sigma_v_obs, n_td)
+    sigma_v_frac_err_flat = np.repeat(sigma_v_frac_err, n_td)
     mst_err_flat = np.repeat(mst_std, n_td)
 
     lens_id = np.repeat(np.arange(n_lens, dtype=int), n_td)
@@ -77,6 +86,8 @@ def _flatten_block(
         "fpd_true": fpd_true_flat,
         "fpd_err": fpd_err_flat,
         "td_err": td_err_flat,
+        "sigma_v_obs": sigma_v_obs_flat,
+        "sigma_v_frac_err": sigma_v_frac_err_flat,
         "mst_err": mst_err_flat,
         "block_id": block_id_arr,
         "lens_id": lens_id,
@@ -110,6 +121,8 @@ def main() -> None:
         "fpd_true": [],
         "fpd_err": [],
         "td_err": [],
+        "sigma_v_obs": [],
+        "sigma_v_frac_err": [],
         "mst_err": [],
         "block_id": [],
         "lens_id": [],
@@ -131,13 +144,18 @@ def main() -> None:
         td_mean, td_std = _mean_std(td_samples, axis=1, min_err=args.min_err)
         td_std = td_std / np.abs(td_mean)
 
-        has_mst = "sigma_v_measured" in block
-        mst_std = _compute_mst_err(block, min_err=args.min_err)
-        if mst_std is None:
+        has_mst = ("sigma_v_measured" in block) and ("sigma_v_likelihood_prec" in block)
+        sig_stats = _compute_sigma_v_stats(block)
+        if sig_stats is None:
             missing_mst_blocks.append(b)
             if args.require_mst:
                 continue
+            sigma_v_obs = np.full(z_lens.shape, np.nan)
+            sigma_v_frac_err = np.full(z_lens.shape, np.nan)
             mst_std = np.full(z_lens.shape, np.nan)
+        else:
+            sigma_v_obs, sigma_v_frac_err = sig_stats
+            mst_std = sigma_v_frac_err
 
         flat_block = _flatten_block(
             z_lens=z_lens,
@@ -145,6 +163,8 @@ def main() -> None:
             fpd_mean=fpd_mean,
             fpd_std=fpd_std,
             td_std=td_std,
+            sigma_v_obs=sigma_v_obs,
+            sigma_v_frac_err=sigma_v_frac_err,
             mst_std=mst_std,
             block_id=b,
         )
