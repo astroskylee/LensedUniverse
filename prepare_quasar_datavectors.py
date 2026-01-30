@@ -7,13 +7,13 @@ Inputs:
 
 Outputs (flat arrays, one row per time-delay measurement):
   - z_lens, z_src
-  - fpd_true, fpd_err
+  - fpd_true, fpd_err (fractional)
   - td_err (fractional)
   - mst_err
   - block_id, lens_id, pair_id
 
 Notes:
-  - fpd stats are computed as mean/std across chain axis=1.
+  - fpd stats are computed as mean/std across chain axis=1, then std/|mean|.
   - td_err is the fractional std across chain axis=1 (std / |mean|).
   - mst_err is std/mean of sigma_v_measured across chain axis=1,
     with the last axis (image-pair dimension) averaged first.
@@ -125,6 +125,7 @@ def main() -> None:
         td_samples = np.asarray(block["td_measured"], dtype=float)
 
         fpd_mean, fpd_std = _mean_std(fpd_samples, axis=1, min_err=args.min_err)
+        fpd_std = fpd_std / np.abs(fpd_mean)
         td_mean, td_std = _mean_std(td_samples, axis=1, min_err=args.min_err)
         td_std = td_std / np.abs(td_mean)
 
