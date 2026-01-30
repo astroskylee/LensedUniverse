@@ -11,7 +11,7 @@ Outputs (flat arrays, one row per time-delay measurement):
   - td_err (fractional)
   - sigma_v_obs
   - sigma_v_frac_err
-  - mst_err (alias of sigma_v_frac_err)
+  - mst_err (2 * sigma_v_frac_err)
   - block_id, lens_id, pair_id
 
 Notes:
@@ -19,6 +19,7 @@ Notes:
   - td_err is the fractional std across chain axis=1 (std / |mean|).
   - sigma_v_obs is inverse-variance weighted across bins, then averaged over chain.
   - sigma_v_frac_err is derived from inverse-variance errors, then averaged over chain.
+  - mst_err assumes sigma_v ∝ sqrt(lambda_int) -> fractional lambda error = 2 * fractional sigma_v error.
 """
 
 from __future__ import annotations
@@ -155,7 +156,7 @@ def main() -> None:
             mst_std = np.full(z_lens.shape, np.nan)
         else:
             sigma_v_obs, sigma_v_frac_err = sig_stats
-            mst_std = sigma_v_frac_err
+            mst_std = 2.0 * sigma_v_frac_err
 
         flat_block = _flatten_block(
             z_lens=z_lens,
