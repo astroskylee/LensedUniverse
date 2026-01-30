@@ -9,14 +9,14 @@ Outputs (flat arrays, one row per time-delay measurement):
   - z_lens, z_src
   - fpd_true, fpd_err (fractional)
   - td_err (fractional)
-  - mst_err
+  - mst_err (from sigma_v_likelihood_prec / sigma_v_measured)
   - block_id, lens_id, pair_id
 
 Notes:
   - fpd stats are computed as mean/std across chain axis=1, then std/|mean|.
   - td_err is the fractional std across chain axis=1 (std / |mean|).
-  - mst_err is std/mean of sigma_v_measured across chain axis=1,
-    with the last axis (image-pair dimension) averaged first.
+  - mst_err is computed as mean(sigma_v_likelihood_prec / sigma_v_measured)
+    across chain axis=1, with the last axis (image-pair dimension) averaged first.
 """
 
 from __future__ import annotations
@@ -38,13 +38,15 @@ def _mean_std(samples: np.ndarray, axis: int = 1, min_err: float = 1e-6) -> Tupl
 
 
 def _compute_mst_err(block: Dict, min_err: float) -> np.ndarray | None:
-    if "sigma_v_measured" not in block:
+    if ("sigma_v_measured" not in block) or ("sigma_v_likelihood_prec" not in block):
         return None
 
     sig = np.asarray(block["sigma_v_measured"], dtype=float)
+    prec = np.asarray(block["sigma_v_likelihood_prec"], dtype=float)
     sig = sig.mean(axis=2)
-    sig_mean, sig_std = _mean_std(sig, axis=1, min_err=min_err)
-    return sig_std / sig_mean
+    prec = prec.mean(axis=2)
+    ratio = prec / sig
+    return np.mean(ratio, axis=1)
 
 
 def _flatten_block(
@@ -173,6 +175,12 @@ def main() -> None:
     print(f"  Missing MST blocks: {missing_mst_blocks}")
     print(f"  Total observations (time delays): {n_obs}")
     print(f"  Observations with MST: {n_mst_ok}")
+    mst_err = out["mst_err"].astype(float)
+    print("  mst_err (fractional) stats:")
+    print(f"    min={np.nanmin(mst_err):.6g}")
+    print(f"    max={np.nanmax(mst_err):.6g}")
+    print(f"    mean={np.nanmean(mst_err):.6g}")
+    print(f"    median={np.nanmedian(mst_err):.6g}")
     print(f"  Saved: {outfile.resolve()}")
 
 
