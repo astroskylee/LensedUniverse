@@ -356,6 +356,7 @@ phi_err_q = phi_err_frac_q * np.abs(phi_true_q)
 lambda_true_q = tool.truncated_normal(1.0, 0.05, 0.8, 1.2, z_lens_q.size, random_state=rng_np)
 
 sigma_v_frac_q = np.asarray([sigma_v_frac_by_block[b] for b in block_id_q])
+mst_mask_q = np.isfinite(sigma_v_frac_q)
 mst_err_frac_q = 2.0 * sigma_v_frac_q
 lambda_err_q = np.where(
     np.isfinite(mst_err_frac_q),
@@ -387,6 +388,7 @@ quasar_data = {
     "phi_scale": phi_scale_q,
     "lambda_obs": lambda_obs_q,
     "lambda_err": lambda_err_q,
+    "mst_mask": mst_mask_q,
 }
 # %% joint hierarchical model
 def joint_model(dspl_data = None, lens_data = None, sne_data = None, quasar_data = None):
@@ -520,11 +522,12 @@ def joint_model(dspl_data = None, lens_data = None, sne_data = None, quasar_data
         phi_scale = quasar_data["phi_scale"]
         lambda_obs = quasar_data["lambda_obs"]
         lambda_err = quasar_data["lambda_err"]
+        mst_mask = jnp.asarray(quasar_data["mst_mask"])
 
         with numpyro.plate("quasar", N_q):
             phi_true_scaled = numpyro.sample("phi_true_scaled_q", dist.Normal(phi_obs, phi_err))
             lambda_q = numpyro.sample("lambda_q", dist.TruncatedNormal(lambda_mean, lambda_sigma, low=0.8, high=1.2))
-            numpyro.sample("lambda_q_like", dist.Normal(lambda_q, lambda_err), obs=lambda_obs)
+            numpyro.sample("lambda_q_like", dist.Normal(lambda_q, lambda_err).mask(mst_mask), obs=lambda_obs)
 
             phi_true = phi_true_scaled / phi_scale
             Ddt_true = Ddt_geom_q * lambda_q
