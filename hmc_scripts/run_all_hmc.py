@@ -20,6 +20,10 @@ required = [
 ]
 
 missing = [p for p in required if not p.exists()]
+
+print("Data paths:")
+for p in required:
+    print(f"  - {p}")
 if missing:
     print("Missing required inputs:")
     for p in missing:
