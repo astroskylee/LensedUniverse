@@ -342,10 +342,10 @@ sigma_v_frac_by_block = {
     0: 0.03,
     1: 0.03,
     2: 0.03,
-    3: 0.05,
-    4: 0.05,
-    5: 0.05,
-    6: 0.05,
+    3: 0.10,
+    4: 0.10,
+    5: 0.10,
+    6: 0.10,
     7: np.nan,
     8: np.nan,
 }
@@ -396,7 +396,7 @@ def joint_model(dspl_data = None, lens_data = None, sne_data = None, quasar_data
     cosmo = cosmology_model("waw0cdm", cosmo_prior, sample_h0=True)
     # shared MST population
     lambda_mean = numpyro.sample("lambda_mean", dist.Uniform(0.9, 1.1))
-    lambda_sigma = numpyro.sample("lambda_sig", dist.TruncatedNormal(0.05, 0.5, low=0.0, high=0.2))
+    lambda_sigma = numpyro.sample("lambda_sigma", dist.TruncatedNormal(0.05, 0.5, low=0.0, high=0.2))
 
     # lens slope & anisotropy population (only used in lens+kin block)
     gamma_mean = numpyro.sample("gamma_mean", dist.Uniform(1.8, 2.2))
@@ -576,7 +576,7 @@ init_values = {
     "w0": -1.0,
     "wa": 0.0,
     "lambda_mean": 1.0,
-    "lambda_sig": 0.05,
+    "lambda_sigma": 0.05,
     # 也可以给 hyper-sigma、gamma_mean 等加上
     "gamma_mean": 2.0,
     "gamma_sigma": 0.2,
@@ -601,7 +601,7 @@ corner_vars = [
     "h0", "Omegam", "w0", "wa",
     "gamma_mean", "gamma_sigma",
     "beta_mean", "beta_sigma",
-    "lambda_mean", "lambda_sig",
+    "lambda_mean", "lambda_sigma",
 ]
 import corner
 truths = [70, 0.32, -1.0, 0.0, 2.0, 0.2, 0.0, 0.2, 1.0, 0.05]
