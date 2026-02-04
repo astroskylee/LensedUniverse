@@ -20,6 +20,7 @@ from jax import random
 import arviz as az
 
 from slcosmo.tools import tool
+from hmc_scripts.corner_utils import select_corner_vars, make_overlay_corner
 
 jax.config.update("jax_enable_x64", True)
 numpyro.enable_x64()
@@ -35,6 +36,8 @@ np.random.seed(SEED)
 TEST_MODE = os.environ.get("COMBINE_FORECAST_TEST") == "1"
 RESULT_DIR = Path("/mnt/lustre/tianli/LensedUniverse_result")
 RESULT_DIR.mkdir(parents=True, exist_ok=True)
+FIG_DIR = workdir / "result"
+FIG_DIR.mkdir(parents=True, exist_ok=True)
 
 cosmo_true = {"Omegam": 0.32, "Omegak": 0.0, "w0": -1.0, "wa": 0.0, "h0": 70.0}
 cosmo_prior = {
@@ -261,10 +264,18 @@ def run_mcmc(data, key, tag):
     posterior = mcmc.get_samples(group_by_chain=True)
     inf_data = az.from_dict(posterior=posterior)
     az.to_netcdf(inf_data, RESULT_DIR / f"quasar_{tag}.nc")
+    return inf_data
 
 
 key = random.PRNGKey(42)
 key_clean, key_noisy = random.split(key)
 
-run_mcmc(quasar_data_clean, key_clean, "clean")
-run_mcmc(quasar_data_noisy, key_noisy, "noisy")
+idata_clean = run_mcmc(quasar_data_clean, key_clean, "clean")
+idata_noisy = run_mcmc(quasar_data_noisy, key_noisy, "noisy")
+
+corner_vars = select_corner_vars(
+    idata_clean,
+    idata_noisy,
+    ["h0", "Omegam", "w0", "wa", "lambda_mean", "lambda_sigma"],
+)
+make_overlay_corner(idata_clean, idata_noisy, corner_vars, FIG_DIR / "quasar_corner_overlay.png")

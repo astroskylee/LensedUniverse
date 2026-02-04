@@ -21,6 +21,7 @@ from jax import random
 import arviz as az
 
 from slcosmo import tool
+from hmc_scripts.corner_utils import select_corner_vars, make_overlay_corner
 
 jax.config.update("jax_enable_x64", True)
 numpyro.enable_x64()
@@ -36,6 +37,8 @@ np.random.seed(SEED)
 TEST_MODE = os.environ.get("COMBINE_FORECAST_TEST") == "1"
 RESULT_DIR = Path("/mnt/lustre/tianli/LensedUniverse_result")
 RESULT_DIR.mkdir(parents=True, exist_ok=True)
+FIG_DIR = workdir / "result"
+FIG_DIR.mkdir(parents=True, exist_ok=True)
 
 DATA_DIR = Path(os.environ.get("SLCOSMO_DATA_DIR", str(workdir / "data")))
 
@@ -457,7 +460,7 @@ def joint_model(dspl_data=None, lens_data=None, sne_data=None, quasar_data=None)
     lambda_mean = numpyro.sample("lambda_mean", dist.Uniform(0.9, 1.1))
     lambda_sigma = numpyro.sample("lambda_sigma", dist.TruncatedNormal(0.05, 0.5, low=0.0, high=0.2))
 
-    gamma_mean = numpyro.sample("gamma_mean", dist.Uniform(1.6, 2.4))
+    gamma_mean = numpyro.sample("gamma_mean", dist.Uniform(1.4, 2.6))
     gamma_sigma = numpyro.sample("gamma_sigma", dist.TruncatedNormal(0.2, 0.2, low=0.0, high=0.4))
 
     beta_mean = numpyro.sample("beta_mean", dist.Uniform(-0.3, 0.3))
@@ -491,7 +494,7 @@ def joint_model(dspl_data=None, lens_data=None, sne_data=None, quasar_data=None)
         dl_lens, ds_lens, dls_lens = tool.dldsdls(lens_data["zl"], lens_data["zs"], cosmo, n=20)
         N_lens = len(lens_data["zl"])
         with numpyro.plate("lens", N_lens):
-            gamma_i = numpyro.sample("gamma_i", dist.TruncatedNormal(gamma_mean, gamma_sigma, low=1.6, high=2.4))
+            gamma_i = numpyro.sample("gamma_i", dist.TruncatedNormal(gamma_mean, gamma_sigma, low=1.4, high=2.6))
             beta_i = numpyro.sample("beta_i", dist.TruncatedNormal(beta_mean, beta_sigma, low=-0.4, high=0.4))
             lambda_lens = numpyro.sample("lambda_lens", dist.TruncatedNormal(lambda_mean, lambda_sigma, low=0.8, high=1.2))
             theta_E_i = numpyro.sample("theta_E_i", dist.Normal(lens_data["theta_E"], lens_data["theta_E_err"]))
@@ -562,6 +565,7 @@ def run_mcmc(data, key, tag):
     posterior = mcmc.get_samples(group_by_chain=True)
     inf_data = az.from_dict(posterior=posterior)
     az.to_netcdf(inf_data, RESULT_DIR / f"joint_{tag}.nc")
+    return inf_data
 
 
 clean_data = {"dspl": dspl_clean, "lens": Lens_clean, "sne": sne_clean, "quasar": quasar_clean}
@@ -570,5 +574,12 @@ noisy_data = {"dspl": dspl_noisy, "lens": Lens_noisy, "sne": sne_noisy, "quasar"
 key = random.PRNGKey(42)
 key_clean, key_noisy = random.split(key)
 
-run_mcmc(clean_data, key_clean, "clean")
-run_mcmc(noisy_data, key_noisy, "noisy")
+idata_clean = run_mcmc(clean_data, key_clean, "clean")
+idata_noisy = run_mcmc(noisy_data, key_noisy, "noisy")
+
+corner_vars = select_corner_vars(
+    idata_clean,
+    idata_noisy,
+    ["h0", "Omegam", "w0", "wa", "lambda_mean", "lambda_sigma", "gamma_mean", "gamma_sigma", "beta_mean", "beta_sigma"],
+)
+make_overlay_corner(idata_clean, idata_noisy, corner_vars, FIG_DIR / "joint_corner_overlay.png")
