@@ -1,0 +1,36 @@
+Currently Loaded Modulefiles: 1) services/slurm <aL> 3) git/2.48.0 2) system/intel64(default) 4) anaconda3/2024.02 Key: (symbolic-version) <module-tag> <aL>=auto-loaded
+Blocks: 9
+Blocks without sigma_v_measured: [7, 8]
+
+block  n_lens  n_td  n_obs  has_mst
+    0      10    3     30    True
+    1      20    3     60    True
+    2      20    1     20    True
+    3      75    3    225    True
+    4      75    1     75    True
+    5      36    3    108    True
+    6     264    1    264    True
+    7     290    1    290   False
+    8      10    3     30   False
+
+--- MST diagnostics ---
+block 00: nonfinite_sigma_v=0, mean_bad=0, std_bad=0, mst_bad=0
+  bad lens idx: []
+block 01: nonfinite_sigma_v=0, mean_bad=0, std_bad=0, mst_bad=0
+  bad lens idx: []
+block 02: nonfinite_sigma_v=0, mean_bad=0, std_bad=0, mst_bad=0
+  bad lens idx: []
+block 03: nonfinite_sigma_v=0, mean_bad=0, std_bad=0, mst_bad=0
+  bad lens idx: []
+block 04: nonfinite_sigma_v=0, mean_bad=0, std_bad=0, mst_bad=0
+  bad lens idx: []
+block 05: nonfinite_sigma_v=0, mean_bad=0, std_bad=0, mst_bad=0
+  bad lens idx: []
+block 06: nonfinite_sigma_v=0, mean_bad=0, std_bad=0, mst_bad=0
+  bad lens idx: []
+
+Summary:
+  total nonfinite sigma_v: 0
+  total mean_bad lenses: 0
+  total std_bad lenses: 0
+  total mst_bad lenses: 0

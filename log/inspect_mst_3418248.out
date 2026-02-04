@@ -1,0 +1,22 @@
+Currently Loaded Modulefiles: 1) services/slurm <aL> 3) git/2.48.0 2) system/intel64(default) 4) anaconda3/2024.02 Key: (symbolic-version) <module-tag> <aL>=auto-loaded
+Block 00: N_lens=10, N_td=3, MST=yes
+Block 01: N_lens=20, N_td=3, MST=yes
+Block 02: N_lens=20, N_td=1, MST=yes
+Block 03: N_lens=75, N_td=3, MST=yes
+Block 04: N_lens=75, N_td=1, MST=yes
+Block 05: N_lens=36, N_td=3, MST=yes
+Block 06: N_lens=264, N_td=1, MST=yes
+Block 07: N_lens=290, N_td=1, MST=no
+Block 08: N_lens=10, N_td=3, MST=no
+
+Summary:
+  Input blocks: 9
+  Missing MST blocks: [7, 8]
+  Total observations (time delays): 1102
+  Observations with MST: 782
+  mst_err (fractional) stats:
+    min=0.0307945
+    max=0.118672
+    mean=0.0934352
+    median=0.0991672
+  Saved: /users/tianli/Temp_data/quasar_datavectors_seed6_processed.npz
