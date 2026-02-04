@@ -10,6 +10,7 @@ os.chdir(workdir)
 sys.path.insert(0, str(workdir))
 
 import numpy as np
+import matplotlib.pyplot as plt
 import jax
 import jax.numpy as jnp
 import numpyro
@@ -189,9 +190,19 @@ def run_mcmc(data, key, tag):
         progress_bar=True,
     )
     mcmc.run(key, dspl_data=data)
+    extra = mcmc.get_extra_fields(group_by_chain=True)
+    n_div = int(np.asarray(extra["diverging"]).sum())
+    print(f"[{tag}] divergences: {n_div}")
     posterior = mcmc.get_samples(group_by_chain=True)
     inf_data = az.from_dict(posterior=posterior)
     az.to_netcdf(inf_data, RESULT_DIR / f"dspl_{tag}.nc")
+    trace_vars = ["h0", "Omegam", "w0", "wa", "lambda_mean", "lambda_sigma"]
+    trace_vars = [v for v in trace_vars if v in inf_data.posterior and inf_data.posterior[v].ndim == 2]
+    if trace_vars:
+        trace_axes = az.plot_trace(inf_data, var_names=trace_vars, compact=False)
+        trace_fig = np.asarray(trace_axes).ravel()[0].figure
+        trace_fig.savefig(FIG_DIR / f"dspl_trace_{tag}.png", dpi=200, bbox_inches="tight")
+        plt.close(trace_fig)
     return inf_data
 
 
