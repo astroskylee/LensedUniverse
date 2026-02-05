@@ -35,9 +35,9 @@ rng_np = np.random.default_rng(SEED)
 np.random.seed(SEED)
 
 TEST_MODE = os.environ.get("COMBINE_FORECAST_TEST") == "1"
-RESULT_DIR = Path("/mnt/lustre/tianli/LensedUniverse_result")
+RESULT_DIR = Path("/mnt/lustre/tianli/slice_hmc")
 RESULT_DIR.mkdir(parents=True, exist_ok=True)
-FIG_DIR = workdir / "result"
+FIG_DIR = RESULT_DIR
 FIG_DIR.mkdir(parents=True, exist_ok=True)
 
 cosmo_true = {"Omegam": 0.32, "Omegak": 0.0, "w0": -1.0, "wa": 0.0, "h0": 70.0}
@@ -273,7 +273,7 @@ def run_mcmc(data, key, tag):
     if trace_vars:
         trace_axes = az.plot_trace(inf_data, var_names=trace_vars, compact=False)
         trace_fig = np.asarray(trace_axes).ravel()[0].figure
-        trace_fig.savefig(FIG_DIR / f"quasar_trace_{tag}.png", dpi=200, bbox_inches="tight")
+        trace_fig.savefig(FIG_DIR / f"quasar_trace_{tag}.pdf", dpi=200, bbox_inches="tight")
         plt.close(trace_fig)
     return inf_data
 
@@ -289,4 +289,4 @@ corner_vars = select_corner_vars(
     idata_noisy,
     ["h0", "Omegam", "w0", "wa", "lambda_mean", "lambda_sigma"],
 )
-make_overlay_corner(idata_clean, idata_noisy, corner_vars, FIG_DIR / "quasar_corner_overlay.png")
+make_overlay_corner(idata_clean, idata_noisy, corner_vars, FIG_DIR / "quasar_corner_overlay.pdf")

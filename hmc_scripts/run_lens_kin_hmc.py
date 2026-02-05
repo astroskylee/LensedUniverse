@@ -34,9 +34,9 @@ rng_np = np.random.default_rng(SEED)
 np.random.seed(SEED)
 
 TEST_MODE = os.environ.get("COMBINE_FORECAST_TEST") == "1"
-RESULT_DIR = Path("/mnt/lustre/tianli/LensedUniverse_result")
+RESULT_DIR = Path("/mnt/lustre/tianli/slice_hmc")
 RESULT_DIR.mkdir(parents=True, exist_ok=True)
-FIG_DIR = workdir / "result"
+FIG_DIR = RESULT_DIR
 FIG_DIR.mkdir(parents=True, exist_ok=True)
 
 DATA_DIR = Path(os.environ.get("SLCOSMO_DATA_DIR", str(workdir / "data")))
@@ -177,7 +177,7 @@ def run_mcmc(data, key, tag):
     trace_vars = [v for v in trace_vars if v in inf_data.posterior and inf_data.posterior[v].ndim == 2]
     trace_axes = az.plot_trace(inf_data, var_names=trace_vars, compact=False)
     trace_fig = np.asarray(trace_axes).ravel()[0].figure
-    trace_fig.savefig(FIG_DIR / f"lens_kin_trace_{tag}.png", dpi=200, bbox_inches="tight")
+    trace_fig.savefig(FIG_DIR / f"lens_kin_trace_{tag}.pdf", dpi=200, bbox_inches="tight")
     plt.close(trace_fig)
     return inf_data
 
@@ -193,4 +193,4 @@ corner_vars = select_corner_vars(
     idata_noisy,
     ["h0", "Omegam", "w0", "wa", "lambda_mean", "lambda_sigma", "gamma_mean", "gamma_sigma", "beta_mean", "beta_sigma"],
 )
-make_overlay_corner(idata_clean, idata_noisy, corner_vars, FIG_DIR / "lens_kin_corner_overlay.png")
+make_overlay_corner(idata_clean, idata_noisy, corner_vars, FIG_DIR / "lens_kin_corner_overlay.pdf")
