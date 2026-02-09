@@ -36,9 +36,9 @@ rng_np = np.random.default_rng(SEED)
 np.random.seed(SEED)
 
 TEST_MODE = os.environ.get("COMBINE_FORECAST_TEST") == "1"
-RESULT_DIR = Path("/mnt/lustre/tianli/slice_hmc")
+RESULT_DIR = Path("/mnt/lustre/tianli/LensedUniverse_result")
 RESULT_DIR.mkdir(parents=True, exist_ok=True)
-FIG_DIR = RESULT_DIR
+FIG_DIR = Path("result")
 FIG_DIR.mkdir(parents=True, exist_ok=True)
 
 DATA_DIR = Path(os.environ.get("SLCOSMO_DATA_DIR", str(workdir / "data")))
