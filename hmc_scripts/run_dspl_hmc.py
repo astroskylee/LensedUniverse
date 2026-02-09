@@ -180,7 +180,7 @@ def run_mcmc(data, key, tag):
     else:
         num_warmup, num_samples, num_chains, chain_method = 500, 1500, 4, "vectorized"
 
-    nuts = NUTS(dspl_model, target_accept_prob=0.85)
+    nuts = NUTS(dspl_model, target_accept_prob=0.95)
     mcmc = MCMC(
         nuts,
         num_warmup=num_warmup,

@@ -586,7 +586,7 @@ init_values = {
 from numpyro.infer import init_to_value, init_to_median
 init_strategy = init_to_value(values=init_values)
 
-nuts_kernel = NUTS(joint_model, target_accept_prob=0.8, dense_mass=[('wa', 'w0', 'h0', 'Omegam', 'lambda_mean')], init_strategy=init_strategy)
+nuts_kernel = NUTS(joint_model, target_accept_prob=0.95, dense_mass=[('wa', 'w0', 'h0', 'Omegam', 'lambda_mean')], init_strategy=init_strategy)
 mcmc = MCMC(
     nuts_kernel,
     num_warmup=num_warmup,
