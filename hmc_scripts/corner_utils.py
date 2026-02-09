@@ -100,5 +100,5 @@ def make_overlay_corner(clean_idata, noisy_idata, vars_post, outfile):
 
     outfile = Path(outfile)
     outfile.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(outfile, dpi=200, bbox_inches="tight")
+    fig.savefig(outfile, bbox_inches="tight")
     plt.close(fig)
