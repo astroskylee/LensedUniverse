@@ -192,6 +192,13 @@ lens_noisy = build_lens(gamma_obs_noisy, thetaE_obs_noisy, vel_obs_noisy)
 # Lens fundamental-plane data (clean + noisy)
 # ---------------------------
 fp_df = pd.read_csv(DATA_DIR / "db_zBEAMS_PEMD_100000_s1_GDB_phot_err_ManySF_TL.csv")
+if TEST_MODE:
+    n_fp_pool = 200
+else:
+    n_fp_pool = 50000
+select_idx_fp = rng_np.choice(fp_df.shape[0], size=min(n_fp_pool, fp_df.shape[0]), replace=False)
+fp_df = fp_df.iloc[np.sort(select_idx_fp)].reset_index(drop=True)
+
 zl_fp = fp_df["zL_true"].to_numpy()
 zs_fp = fp_df["zS_true"].to_numpy()
 thetaE_true_fp = fp_df["tE_true"].to_numpy()
@@ -204,17 +211,28 @@ _dl_fp_true, ds_fp_true, dls_fp_true = tool.dldsdls(zl_fp, zs_fp, cosmo_true, n=
 gamma_true_fp = tool.truncated_normal(2.0, 0.2, 1.5, 2.5, zl_fp.size, random_state=rng_np)
 beta_true_fp = tool.truncated_normal(0.0, 0.2, -0.4, 0.4, zl_fp.size, random_state=rng_np)
 lambda_true_fp = tool.truncated_normal(1.0, 0.05, 0.8, 1.2, zl_fp.size, random_state=rng_np)
+gamma_err_fp = np.full(zl_fp.size, 0.2)
+n_gamma_obs_fp = min(10000, zl_fp.size)
+gamma_has_obs_fp = np.zeros(zl_fp.size, dtype=bool)
+gamma_obs_idx_fp = rng_np.choice(zl_fp.size, size=n_gamma_obs_fp, replace=False)
+gamma_has_obs_fp[gamma_obs_idx_fp] = True
 vel_model_fp = jampy_interp(thetaE_true_fp, gamma_true_fp, re_fp, beta_true_fp) * jnp.sqrt(ds_fp_true / dls_fp_true)
 vel_true_fp = np.asarray(vel_model_fp) * np.sqrt(lambda_true_fp)
 vel_err_fp = vel_frac_err_template * np.abs(vel_true_fp)
 
 thetaE_obs_clean_fp = thetaE_true_fp.copy()
 vel_obs_clean_fp = vel_true_fp.copy()
+gamma_obs_clean_fp = np.zeros(zl_fp.size)
+gamma_obs_clean_fp[gamma_has_obs_fp] = gamma_true_fp[gamma_has_obs_fp]
 thetaE_obs_noisy_fp = thetaE_true_fp + rng_np.normal(0.0, thetaE_err_fp)
 vel_obs_noisy_fp = rng_np.normal(vel_true_fp, vel_err_fp)
+gamma_obs_noisy_fp = np.zeros(zl_fp.size)
+gamma_obs_noisy_fp[gamma_has_obs_fp] = gamma_true_fp[gamma_has_obs_fp] + rng_np.normal(
+    0.0, gamma_err_fp[gamma_has_obs_fp]
+)
 
 
-def build_fp(theta_E_obs, vel_obs):
+def build_fp(theta_E_obs, vel_obs, gamma_obs):
     return {
         "zl": zl_fp,
         "zs": zs_fp,
@@ -223,11 +241,14 @@ def build_fp(theta_E_obs, vel_obs):
         "re": re_fp,
         "vel_obs": vel_obs,
         "vel_err": vel_err_fp,
+        "gamma_obs": gamma_obs,
+        "gamma_err": gamma_err_fp,
+        "gamma_has_obs": gamma_has_obs_fp,
     }
 
 
-fp_clean = build_fp(thetaE_obs_clean_fp, vel_obs_clean_fp)
-fp_noisy = build_fp(thetaE_obs_noisy_fp, vel_obs_noisy_fp)
+fp_clean = build_fp(thetaE_obs_clean_fp, vel_obs_clean_fp, gamma_obs_clean_fp)
+fp_noisy = build_fp(thetaE_obs_noisy_fp, vel_obs_noisy_fp, gamma_obs_noisy_fp)
 
 # ---------------------------
 # SNe time-delay data (clean + noisy)
@@ -560,6 +581,13 @@ def joint_model(dspl_data=None, lens_data=None, fp_data=None, sne_data=None, qua
             thetaE_fp = numpyro.sample("thetaE_fp", dist.Normal(fp_data["theta_E"], fp_data["theta_E_err"]))
             v_interp_fp = jampy_interp(thetaE_fp, gamma_fp, fp_data["re"], beta_fp)
             vel_pred_fp = v_interp_fp * jnp.sqrt(ds_fp / dls_fp) * jnp.sqrt(lambda_fp)
+            gamma_obs_mask_fp = jnp.asarray(fp_data["gamma_has_obs"])
+            gamma_obs_used_fp = jnp.where(gamma_obs_mask_fp, fp_data["gamma_obs"], gamma_fp)
+            numpyro.sample(
+                "gamma_fp_like",
+                dist.Normal(gamma_fp, fp_data["gamma_err"]).mask(gamma_obs_mask_fp),
+                obs=gamma_obs_used_fp,
+            )
             numpyro.sample("vel_fp_like", dist.Normal(vel_pred_fp, fp_data["vel_err"]), obs=fp_data["vel_obs"])
 
     if sne_data is not None:
@@ -610,7 +638,7 @@ def joint_model(dspl_data=None, lens_data=None, fp_data=None, sne_data=None, qua
 
 
 def run_mcmc(data, key, tag):
-    nuts = NUTS(joint_model, target_accept_prob=0.85)
+    nuts = NUTS(joint_model, target_accept_prob=0.95)
     mcmc = MCMC(
         nuts,
         num_warmup=num_warmup,

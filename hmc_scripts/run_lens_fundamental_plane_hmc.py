@@ -80,17 +80,26 @@ _dl_fp_true, ds_fp_true, dls_fp_true = tool.dldsdls(zl_fp, zs_fp, cosmo_true, n=
 gamma_true_fp = tool.truncated_normal(2.0, 0.2, 1.5, 2.5, zl_fp.size, random_state=rng_np)
 beta_true_fp = tool.truncated_normal(0.0, 0.2, -0.4, 0.4, zl_fp.size, random_state=rng_np)
 lambda_true_fp = tool.truncated_normal(1.0, 0.05, 0.8, 1.2, zl_fp.size, random_state=rng_np)
+gamma_err_fp = np.full(zl_fp.size, 0.2)
+n_gamma_obs = min(10000, zl_fp.size)
+gamma_has_obs = np.zeros(zl_fp.size, dtype=bool)
+gamma_obs_idx = rng_np.choice(zl_fp.size, size=n_gamma_obs, replace=False)
+gamma_has_obs[gamma_obs_idx] = True
 vel_model_fp = jampy_interp(thetaE_true_fp, gamma_true_fp, re_fp, beta_true_fp) * jnp.sqrt(ds_fp_true / dls_fp_true)
 vel_true_fp = np.asarray(vel_model_fp) * np.sqrt(lambda_true_fp)
 vel_err_fp = vel_frac_err_template * np.abs(vel_true_fp)
 
 thetaE_obs_clean_fp = thetaE_true_fp.copy()
 vel_obs_clean_fp = vel_true_fp.copy()
+gamma_obs_clean_fp = np.zeros(zl_fp.size)
+gamma_obs_clean_fp[gamma_has_obs] = gamma_true_fp[gamma_has_obs]
 thetaE_obs_noisy_fp = thetaE_true_fp + rng_np.normal(0.0, thetaE_err_fp)
 vel_obs_noisy_fp = rng_np.normal(vel_true_fp, vel_err_fp)
+gamma_obs_noisy_fp = np.zeros(zl_fp.size)
+gamma_obs_noisy_fp[gamma_has_obs] = gamma_true_fp[gamma_has_obs] + rng_np.normal(0.0, gamma_err_fp[gamma_has_obs])
 
 
-def build_data(theta_E_obs, vel_obs):
+def build_data(theta_E_obs, vel_obs, gamma_obs):
     return {
         "zl": zl_fp,
         "zs": zs_fp,
@@ -99,11 +108,14 @@ def build_data(theta_E_obs, vel_obs):
         "re": re_fp,
         "vel_obs": vel_obs,
         "vel_err": vel_err_fp,
+        "gamma_obs": gamma_obs,
+        "gamma_err": gamma_err_fp,
+        "gamma_has_obs": gamma_has_obs,
     }
 
 
-fp_data_clean = build_data(thetaE_obs_clean_fp, vel_obs_clean_fp)
-fp_data_noisy = build_data(thetaE_obs_noisy_fp, vel_obs_noisy_fp)
+fp_data_clean = build_data(thetaE_obs_clean_fp, vel_obs_clean_fp, gamma_obs_clean_fp)
+fp_data_noisy = build_data(thetaE_obs_noisy_fp, vel_obs_noisy_fp, gamma_obs_noisy_fp)
 
 
 def cosmology_model(kind, cosmo_prior, sample_h0=True):
@@ -145,6 +157,13 @@ def fundamental_plane_model(fp_data):
 
         v_interp_fp = jampy_interp(thetaE_fp, gamma_fp, fp_data["re"], beta_fp)
         vel_pred_fp = v_interp_fp * jnp.sqrt(ds_fp / dls_fp) * jnp.sqrt(lambda_fp)
+        gamma_obs_mask = jnp.asarray(fp_data["gamma_has_obs"])
+        gamma_obs_used = jnp.where(gamma_obs_mask, fp_data["gamma_obs"], gamma_fp)
+        numpyro.sample(
+            "gamma_fp_like",
+            dist.Normal(gamma_fp, fp_data["gamma_err"]).mask(gamma_obs_mask),
+            obs=gamma_obs_used,
+        )
         numpyro.sample("vel_fp_like", dist.Normal(vel_pred_fp, fp_data["vel_err"]), obs=fp_data["vel_obs"])
 
 
@@ -154,7 +173,7 @@ def run_mcmc(data, key, tag):
     else:
         num_warmup, num_samples, num_chains, chain_method = 500, 1500, 4, "vectorized"
 
-    nuts = NUTS(fundamental_plane_model, target_accept_prob=0.85)
+    nuts = NUTS(fundamental_plane_model, target_accept_prob=0.95)
     mcmc = MCMC(
         nuts,
         num_warmup=num_warmup,
