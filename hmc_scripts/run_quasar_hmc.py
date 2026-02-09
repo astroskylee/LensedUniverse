@@ -40,6 +40,11 @@ RESULT_DIR.mkdir(parents=True, exist_ok=True)
 FIG_DIR = Path("result")
 FIG_DIR.mkdir(parents=True, exist_ok=True)
 
+
+def step(message):
+    print(f"[STEP] {message}", flush=True)
+
+
 cosmo_true = {"Omegam": 0.32, "Omegak": 0.0, "w0": -1.0, "wa": 0.0, "h0": 70.0}
 cosmo_prior = {
     "w0_up": 0.0,   "w0_low": -2.0,
@@ -49,6 +54,7 @@ cosmo_prior = {
     "omegam_up": 0.5, "omegam_low": 0.1,
 }
 
+step("Load quasar block data and build time-delay base vectors")
 DATA_JSON = Path("../Temp_data/static_datavectors_seed6.json")
 with DATA_JSON.open("r") as f:
     blocks = json.load(f)
@@ -140,6 +146,7 @@ lambda_err = np.where(mst_mask, mst_err_frac * np.abs(lambda_true), lambda_pop_s
 
 t_true = t_base * lambda_true
 
+step("Build clean/noisy mock quasar observables")
 def scale_phi(phi_in):
     finite = np.isfinite(phi_in) & (phi_in != 0)
     if not np.any(finite):
@@ -235,6 +242,7 @@ def quasar_model(zl, zs, t_obs, t_err, phi_obs, phi_err, phi_scale, lambda_obs, 
 
 
 def run_mcmc(data, key, tag):
+    step(f"Run MCMC for quasar ({tag})")
     if TEST_MODE:
         num_warmup, num_samples, num_chains, chain_method = 200, 200, 2, "sequential"
     else:
@@ -281,9 +289,11 @@ def run_mcmc(data, key, tag):
 key = random.PRNGKey(42)
 key_clean, key_noisy = random.split(key)
 
+step("Execute clean and noisy runs")
 idata_clean = run_mcmc(quasar_data_clean, key_clean, "clean")
 idata_noisy = run_mcmc(quasar_data_noisy, key_noisy, "noisy")
 
+step("Create overlay corner plot")
 corner_vars = select_corner_vars(
     idata_clean,
     idata_noisy,

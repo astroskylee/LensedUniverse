@@ -41,6 +41,10 @@ FIG_DIR.mkdir(parents=True, exist_ok=True)
 
 DATA_DIR = Path(os.environ.get("SLCOSMO_DATA_DIR", str(workdir / "data")))
 
+
+def step(message):
+    print(f"[STEP] {message}", flush=True)
+
 cosmo_true = {"Omegam": 0.32, "Omegak": 0.0, "w0": -1.0, "wa": 0.0, "h0": 70.0}
 cosmo_prior = {
     "w0_up": 0.0,   "w0_low": -2.0,
@@ -50,6 +54,7 @@ cosmo_prior = {
     "omegam_up": 0.5, "omegam_low": 0.1,
 }
 
+step("Load lensing lookup table and Euclid lens catalog")
 LUT = np.load(DATA_DIR / "velocity_disp_table.npy")
 N1, N2, N3, N4 = LUT.shape
 thetaE_grid = np.linspace(0.5, 3.0, N1)
@@ -73,6 +78,7 @@ re_lens = re_lens[mask_lens]
 _dl, ds_lens, dls_lens = tool.dldsdls(zl_lens, zs_lens, cosmo_true, n=20)
 N_lens = len(zl_lens)
 
+step("Build clean/noisy mock lens+kinematic observables")
 gamma_true = tool.truncated_normal(2.0, 0.2, 1.5, 2.5, N_lens, random_state=rng_np)
 beta_true = tool.truncated_normal(0.0, 0.2, -0.4, 0.4, N_lens, random_state=rng_np)
 vel_model = jampy_interp(thetaE_lens, gamma_true, re_lens, beta_true) * jnp.sqrt(ds_lens / dls_lens)
@@ -152,6 +158,7 @@ def lens_model(lens_data):
 
 
 def run_mcmc(data, key, tag):
+    step(f"Run MCMC for lens+kin ({tag})")
     if TEST_MODE:
         num_warmup, num_samples, num_chains, chain_method = 200, 200, 2, "sequential"
     else:
@@ -185,9 +192,11 @@ def run_mcmc(data, key, tag):
 key = random.PRNGKey(42)
 key_clean, key_noisy = random.split(key)
 
+step("Execute clean and noisy runs")
 idata_clean = run_mcmc(lens_data_clean, key_clean, "clean")
 idata_noisy = run_mcmc(lens_data_noisy, key_noisy, "noisy")
 
+step("Create overlay corner plot")
 corner_vars = select_corner_vars(
     idata_clean,
     idata_noisy,

@@ -43,6 +43,11 @@ FIG_DIR.mkdir(parents=True, exist_ok=True)
 DATA_DIR = Path(os.environ.get("SLCOSMO_DATA_DIR", str(workdir / "data")))
 DATA_CSV = DATA_DIR / "db_zBEAMS_PEMD_100000_s1_GDB_phot_err_ManySF_TL.csv"
 
+
+def step(message):
+    print(f"[STEP] {message}", flush=True)
+
+
 cosmo_true = {"Omegam": 0.32, "Omegak": 0.0, "w0": -1.0, "wa": 0.0, "h0": 70.0}
 cosmo_prior = {
     "w0_up": 0.0,   "w0_low": -2.0,
@@ -52,6 +57,7 @@ cosmo_prior = {
     "omegam_up": 0.5, "omegam_low": 0.1,
 }
 
+step("Load lookup table and fundamental-plane catalog")
 LUT = np.load(DATA_DIR / "velocity_disp_table.npy")
 N1, N2, N3, N4 = LUT.shape
 thetaE_grid = np.linspace(0.5, 3.0, N1)
@@ -77,6 +83,7 @@ veldisp_true_catalog = fp_df["veldisp_true"].to_numpy()
 vel_frac_err_template = fp_df["sigma_veldisp_obs"].to_numpy() / veldisp_true_catalog
 
 _dl_fp_true, ds_fp_true, dls_fp_true = tool.dldsdls(zl_fp, zs_fp, cosmo_true, n=20)
+step("Build clean/noisy mock fundamental-plane observables")
 gamma_true_fp = tool.truncated_normal(2.0, 0.2, 1.5, 2.5, zl_fp.size, random_state=rng_np)
 beta_true_fp = tool.truncated_normal(0.0, 0.2, -0.4, 0.4, zl_fp.size, random_state=rng_np)
 lambda_true_fp = tool.truncated_normal(1.0, 0.05, 0.8, 1.2, zl_fp.size, random_state=rng_np)
@@ -168,6 +175,7 @@ def fundamental_plane_model(fp_data):
 
 
 def run_mcmc(data, key, tag):
+    step(f"Run MCMC for lens fundamental-plane ({tag})")
     if TEST_MODE:
         num_warmup, num_samples, num_chains, chain_method = 200, 200, 2, "sequential"
     else:
@@ -204,9 +212,11 @@ def run_mcmc(data, key, tag):
 key = random.PRNGKey(42)
 key_clean, key_noisy = random.split(key)
 
+step("Execute clean and noisy runs")
 idata_clean = run_mcmc(fp_data_clean, key_clean, "clean")
 idata_noisy = run_mcmc(fp_data_noisy, key_noisy, "noisy")
 
+step("Create overlay corner plot")
 corner_vars = select_corner_vars(
     idata_clean,
     idata_noisy,

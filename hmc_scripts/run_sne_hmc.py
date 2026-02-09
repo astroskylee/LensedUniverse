@@ -42,6 +42,10 @@ FIG_DIR.mkdir(parents=True, exist_ok=True)
 
 DATA_DIR = Path(os.environ.get("SLCOSMO_DATA_DIR", str(workdir / "data")))
 
+
+def step(message):
+    print(f"[STEP] {message}", flush=True)
+
 cosmo_true = {"Omegam": 0.32, "Omegak": 0.0, "w0": -1.0, "wa": 0.0, "h0": 70.0}
 cosmo_prior = {
     "w0_up": 0.0,   "w0_low": -2.0,
@@ -51,6 +55,7 @@ cosmo_prior = {
     "omegam_up": 0.5, "omegam_low": 0.1,
 }
 
+step("Load SNe catalog and distance-delay geometry")
 sn_data = pd.read_csv(DATA_DIR / "Euclid_150SNe.csv")
 sn_data = sn_data[(sn_data["tmax"] >= 5) & (sn_data["tmax"] <= 80)]
 sn_data = sn_data.nlargest(100, "tmax")
@@ -72,6 +77,7 @@ sigma_t_days = 1.0
 sigma_phi_frac = 0.04
 sigma_lambda_frac = 0.08
 
+step("Build clean/noisy mock SNe observables")
 lambda_pop_mean = 1.0
 lambda_pop_sigma = 0.05
 lambda_low, lambda_high = 0.8, 1.2
@@ -176,6 +182,7 @@ def sne_model(zl, zs, t_obs, phi_obs, lambda_obs, lambda_err, phi_scale, sigma_t
 
 
 def run_mcmc(data, key, tag):
+    step(f"Run MCMC for SNe ({tag})")
     if TEST_MODE:
         num_warmup, num_samples, num_chains, chain_method = 200, 200, 2, "sequential"
     else:
@@ -221,9 +228,11 @@ def run_mcmc(data, key, tag):
 key = random.PRNGKey(42)
 key_clean, key_noisy = random.split(key)
 
+step("Execute clean and noisy runs")
 idata_clean = run_mcmc(sne_data_clean, key_clean, "clean")
 idata_noisy = run_mcmc(sne_data_noisy, key_noisy, "noisy")
 
+step("Create overlay corner plot")
 corner_vars = select_corner_vars(
     idata_clean,
     idata_noisy,

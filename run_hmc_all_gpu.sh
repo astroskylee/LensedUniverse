@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
@@ -20,8 +21,20 @@ echo `module list`
 source /mnt/lustre2/shared_conda/envs/tianli/herculens_tian/bin/activate
 cd /users/tianli/LensedUniverse
 
+echo "[STEP] Run lens+kinematic HMC"
 python -u hmc_scripts/run_lens_kin_hmc.py
+
+echo "[STEP] Run lens fundamental-plane HMC"
+python -u hmc_scripts/run_lens_fundamental_plane_hmc.py
+
+echo "[STEP] Run DSPL HMC"
 python -u hmc_scripts/run_dspl_hmc.py
+
+echo "[STEP] Run lensed SNe HMC"
 python -u hmc_scripts/run_sne_hmc.py
+
+echo "[STEP] Run lensed quasar HMC"
 python -u hmc_scripts/run_quasar_hmc.py
+
+echo "[STEP] Run joint HMC"
 python -u hmc_scripts/run_joint_hmc.py

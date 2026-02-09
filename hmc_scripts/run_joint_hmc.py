@@ -43,6 +43,11 @@ FIG_DIR.mkdir(parents=True, exist_ok=True)
 
 DATA_DIR = Path(os.environ.get("SLCOSMO_DATA_DIR", str(workdir / "data")))
 
+
+def step(message):
+    print(f"[STEP] {message}", flush=True)
+
+
 cosmo_true = {"Omegam": 0.32, "Omegak": 0.0, "w0": -1.0, "wa": 0.0, "h0": 70.0}
 cosmo_prior = {
     "w0_up": 0.0,   "w0_low": -2.0,
@@ -55,6 +60,7 @@ cosmo_prior = {
 # ---------------------------
 # DSPL data (clean + noisy)
 # ---------------------------
+step("Build DSPL clean/noisy datasets")
 data_dspl = np.loadtxt(DATA_DIR / "EuclidDSPLs_1.txt")
 data_dspl = data_dspl[(data_dspl[:, 5] < 0.95)]
 
@@ -132,6 +138,7 @@ dspl_noisy = build_dspl(lambda_obs_dspl_noisy, beta_obs_dspl_noisy, zs2_use_nois
 # ---------------------------
 # Lens+kin data (clean + noisy)
 # ---------------------------
+step("Build lens+kinematic clean/noisy datasets")
 LUT = np.load(DATA_DIR / "velocity_disp_table.npy")
 N1, N2, N3, N4 = LUT.shape
 thetaE_grid = np.linspace(0.5, 3.0, N1)
@@ -191,6 +198,7 @@ lens_noisy = build_lens(gamma_obs_noisy, thetaE_obs_noisy, vel_obs_noisy)
 # ---------------------------
 # Lens fundamental-plane data (clean + noisy)
 # ---------------------------
+step("Build fundamental-plane clean/noisy datasets")
 fp_df = pd.read_csv(DATA_DIR / "db_zBEAMS_PEMD_100000_s1_GDB_phot_err_ManySF_TL.csv")
 if TEST_MODE:
     n_fp_pool = 200
@@ -253,6 +261,7 @@ fp_noisy = build_fp(thetaE_obs_noisy_fp, vel_obs_noisy_fp, gamma_obs_noisy_fp)
 # ---------------------------
 # SNe time-delay data (clean + noisy)
 # ---------------------------
+step("Build SNe clean/noisy datasets")
 sn_data = pd.read_csv(DATA_DIR / "Euclid_150SNe.csv")
 sn_data = sn_data[(sn_data["tmax"] >= 5) & (sn_data["tmax"] <= 80)]
 sn_data = sn_data.nlargest(70, "tmax")
@@ -330,6 +339,7 @@ sne_noisy = {
 # ---------------------------
 # Quasar time-delay data (clean + noisy)
 # ---------------------------
+step("Build quasar clean/noisy datasets")
 DATA_JSON = Path("../Temp_data/static_datavectors_seed6.json")
 with DATA_JSON.open("r") as f:
     quasar_blocks = json.load(f)
@@ -488,6 +498,7 @@ else:
     num_chains = 4
     chain_method = "vectorized"
 
+step("Apply per-probe sample limits for this run mode")
 
 dspl_clean = head_dict(dspl_clean, N_DSPL_USE)
 Lens_clean = head_dict(lens_clean, N_LENS_USE)
@@ -638,6 +649,7 @@ def joint_model(dspl_data=None, lens_data=None, fp_data=None, sne_data=None, qua
 
 
 def run_mcmc(data, key, tag):
+    step(f"Run joint MCMC ({tag})")
     nuts = NUTS(joint_model, target_accept_prob=0.95)
     mcmc = MCMC(
         nuts,
@@ -677,9 +689,11 @@ noisy_data = {"dspl": dspl_noisy, "lens": Lens_noisy, "fp": fp_noisy, "sne": sne
 key = random.PRNGKey(42)
 key_clean, key_noisy = random.split(key)
 
+step("Execute clean and noisy joint runs")
 idata_clean = run_mcmc(clean_data, key_clean, "clean")
 idata_noisy = run_mcmc(noisy_data, key_noisy, "noisy")
 
+step("Create overlay corner plot")
 corner_vars = select_corner_vars(
     idata_clean,
     idata_noisy,

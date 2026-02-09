@@ -11,6 +11,11 @@ os.chdir(repo_root)
 DATA_DIR = Path(os.environ.get("SLCOSMO_DATA_DIR", str(repo_root / "data")))
 QUASAR_JSON = Path(os.environ.get("QUASAR_JSON", str(repo_root / "../Temp_data/static_datavectors_seed6.json")))
 
+
+def step(message):
+    print(f"[STEP] {message}", flush=True)
+
+
 required = [
     DATA_DIR / "EuclidDSPLs_1.txt",
     DATA_DIR / "Euclid_len.txt",
@@ -22,6 +27,7 @@ required = [
 
 missing = [p for p in required if not p.exists()]
 
+step("Check required input data paths")
 print("Data paths:")
 for p in required:
     print(f"  - {p}")
@@ -40,5 +46,7 @@ scripts = [
     "hmc_scripts/run_joint_hmc.py",
 ]
 
+step("Run each HMC probe script in sequence")
 for script in scripts:
+    print(f"[STEP] Launch {script}", flush=True)
     subprocess.run(["python", "-u", script], check=True)
