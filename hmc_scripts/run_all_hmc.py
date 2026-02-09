@@ -16,6 +16,7 @@ required = [
     DATA_DIR / "Euclid_len.txt",
     DATA_DIR / "Euclid_150SNe.csv",
     DATA_DIR / "velocity_disp_table.npy",
+    DATA_DIR / "db_zBEAMS_PEMD_100000_s1_GDB_phot_err_ManySF_TL.csv",
     QUASAR_JSON,
 ]
 
@@ -32,6 +33,7 @@ if missing:
 
 scripts = [
     "hmc_scripts/run_lens_kin_hmc.py",
+    "hmc_scripts/run_lens_fundamental_plane_hmc.py",
     "hmc_scripts/run_dspl_hmc.py",
     "hmc_scripts/run_sne_hmc.py",
     "hmc_scripts/run_quasar_hmc.py",

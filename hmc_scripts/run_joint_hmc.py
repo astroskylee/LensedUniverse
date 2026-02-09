@@ -189,6 +189,47 @@ lens_clean = build_lens(gamma_obs_clean, thetaE_obs_clean, vel_obs_clean)
 lens_noisy = build_lens(gamma_obs_noisy, thetaE_obs_noisy, vel_obs_noisy)
 
 # ---------------------------
+# Lens fundamental-plane data (clean + noisy)
+# ---------------------------
+fp_df = pd.read_csv(DATA_DIR / "db_zBEAMS_PEMD_100000_s1_GDB_phot_err_ManySF_TL.csv")
+zl_fp = fp_df["zL_true"].to_numpy()
+zs_fp = fp_df["zS_true"].to_numpy()
+thetaE_true_fp = fp_df["tE_true"].to_numpy()
+thetaE_err_fp = fp_df["sigma_tE_obs"].to_numpy()
+re_fp = fp_df["r_true"].to_numpy()
+veldisp_true_catalog = fp_df["veldisp_true"].to_numpy()
+vel_frac_err_template = fp_df["sigma_veldisp_obs"].to_numpy() / veldisp_true_catalog
+
+_dl_fp_true, ds_fp_true, dls_fp_true = tool.dldsdls(zl_fp, zs_fp, cosmo_true, n=20)
+gamma_true_fp = tool.truncated_normal(2.0, 0.2, 1.5, 2.5, zl_fp.size, random_state=rng_np)
+beta_true_fp = tool.truncated_normal(0.0, 0.2, -0.4, 0.4, zl_fp.size, random_state=rng_np)
+lambda_true_fp = tool.truncated_normal(1.0, 0.05, 0.8, 1.2, zl_fp.size, random_state=rng_np)
+vel_model_fp = jampy_interp(thetaE_true_fp, gamma_true_fp, re_fp, beta_true_fp) * jnp.sqrt(ds_fp_true / dls_fp_true)
+vel_true_fp = np.asarray(vel_model_fp) * np.sqrt(lambda_true_fp)
+vel_err_fp = vel_frac_err_template * np.abs(vel_true_fp)
+
+thetaE_obs_clean_fp = thetaE_true_fp.copy()
+vel_obs_clean_fp = vel_true_fp.copy()
+thetaE_obs_noisy_fp = thetaE_true_fp + rng_np.normal(0.0, thetaE_err_fp)
+vel_obs_noisy_fp = rng_np.normal(vel_true_fp, vel_err_fp)
+
+
+def build_fp(theta_E_obs, vel_obs):
+    return {
+        "zl": zl_fp,
+        "zs": zs_fp,
+        "theta_E": theta_E_obs,
+        "theta_E_err": thetaE_err_fp,
+        "re": re_fp,
+        "vel_obs": vel_obs,
+        "vel_err": vel_err_fp,
+    }
+
+
+fp_clean = build_fp(thetaE_obs_clean_fp, vel_obs_clean_fp)
+fp_noisy = build_fp(thetaE_obs_noisy_fp, vel_obs_noisy_fp)
+
+# ---------------------------
 # SNe time-delay data (clean + noisy)
 # ---------------------------
 sn_data = pd.read_csv(DATA_DIR / "Euclid_150SNe.csv")
@@ -408,6 +449,7 @@ def head_dict(data_dict, N_use=None):
 if TEST_MODE:
     N_DSPL_USE = 50
     N_LENS_USE = 200
+    N_FP_USE = 200
     N_SNE_USE = 10
     N_QUASAR_USE = 30
     num_warmup = 200
@@ -417,6 +459,7 @@ if TEST_MODE:
 else:
     N_DSPL_USE = 1200
     N_LENS_USE = 5000
+    N_FP_USE = 5000
     N_SNE_USE = 50
     N_QUASAR_USE = 500
     num_warmup = 500
@@ -427,11 +470,13 @@ else:
 
 dspl_clean = head_dict(dspl_clean, N_DSPL_USE)
 Lens_clean = head_dict(lens_clean, N_LENS_USE)
+fp_clean = head_dict(fp_clean, N_FP_USE)
 sne_clean = head_dict(sne_clean, N_SNE_USE)
 quasar_clean = head_dict(quasar_clean, N_QUASAR_USE)
 
 dspl_noisy = head_dict(dspl_noisy, N_DSPL_USE)
 Lens_noisy = head_dict(lens_noisy, N_LENS_USE)
+fp_noisy = head_dict(fp_noisy, N_FP_USE)
 sne_noisy = head_dict(sne_noisy, N_SNE_USE)
 quasar_noisy = head_dict(quasar_noisy, N_QUASAR_USE)
 
@@ -455,7 +500,7 @@ def cosmology_model(kind, cosmo_prior, sample_h0=True):
     return cosmo
 
 
-def joint_model(dspl_data=None, lens_data=None, sne_data=None, quasar_data=None):
+def joint_model(dspl_data=None, lens_data=None, fp_data=None, sne_data=None, quasar_data=None):
     cosmo = cosmology_model("waw0cdm", cosmo_prior, sample_h0=True)
 
     lambda_mean = numpyro.sample("lambda_mean", dist.Uniform(0.9, 1.1))
@@ -504,6 +549,18 @@ def joint_model(dspl_data=None, lens_data=None, sne_data=None, quasar_data=None)
 
             numpyro.sample("gamma_obs_lens", dist.Normal(gamma_i, 0.05), obs=lens_data["gamma_obs"])
             numpyro.sample("vel_lens_like", dist.Normal(vel_pred, lens_data["vel_err"]), obs=lens_data["vel_obs"])
+
+    if fp_data is not None:
+        _dl_fp, ds_fp, dls_fp = tool.dldsdls(fp_data["zl"], fp_data["zs"], cosmo, n=20)
+        N_fp = len(fp_data["zl"])
+        with numpyro.plate("fundamental_plane", N_fp):
+            gamma_fp = numpyro.sample("gamma_fp", dist.TruncatedNormal(gamma_mean, gamma_sigma, low=1.4, high=2.6))
+            beta_fp = numpyro.sample("beta_fp", dist.TruncatedNormal(beta_mean, beta_sigma, low=-0.4, high=0.4))
+            lambda_fp = numpyro.sample("lambda_fp", dist.TruncatedNormal(lambda_mean, lambda_sigma, low=0.8, high=1.2))
+            thetaE_fp = numpyro.sample("thetaE_fp", dist.Normal(fp_data["theta_E"], fp_data["theta_E_err"]))
+            v_interp_fp = jampy_interp(thetaE_fp, gamma_fp, fp_data["re"], beta_fp)
+            vel_pred_fp = v_interp_fp * jnp.sqrt(ds_fp / dls_fp) * jnp.sqrt(lambda_fp)
+            numpyro.sample("vel_fp_like", dist.Normal(vel_pred_fp, fp_data["vel_err"]), obs=fp_data["vel_obs"])
 
     if sne_data is not None:
         Dl_sne, Ds_sne, Dls_sne = tool.dldsdls(sne_data["zl"], sne_data["zs"], cosmo, n=20)
@@ -562,7 +619,14 @@ def run_mcmc(data, key, tag):
         chain_method=chain_method,
         progress_bar=True,
     )
-    mcmc.run(key, dspl_data=data["dspl"], lens_data=data["lens"], sne_data=data["sne"], quasar_data=data["quasar"])
+    mcmc.run(
+        key,
+        dspl_data=data["dspl"],
+        lens_data=data["lens"],
+        fp_data=data["fp"],
+        sne_data=data["sne"],
+        quasar_data=data["quasar"],
+    )
     extra = mcmc.get_extra_fields(group_by_chain=True)
     n_div = int(np.asarray(extra["diverging"]).sum())
     print(f"[{tag}] divergences: {n_div}")
@@ -579,8 +643,8 @@ def run_mcmc(data, key, tag):
     return inf_data
 
 
-clean_data = {"dspl": dspl_clean, "lens": Lens_clean, "sne": sne_clean, "quasar": quasar_clean}
-noisy_data = {"dspl": dspl_noisy, "lens": Lens_noisy, "sne": sne_noisy, "quasar": quasar_noisy}
+clean_data = {"dspl": dspl_clean, "lens": Lens_clean, "fp": fp_clean, "sne": sne_clean, "quasar": quasar_clean}
+noisy_data = {"dspl": dspl_noisy, "lens": Lens_noisy, "fp": fp_noisy, "sne": sne_noisy, "quasar": quasar_noisy}
 
 key = random.PRNGKey(42)
 key_clean, key_noisy = random.split(key)
