@@ -17,7 +17,7 @@ from jax import random
 
 from slcosmo import SLCOSMO, SLmodel, tool
 
-TEST_MODE = os.environ.get("COMBINE_FORECAST_TEST") == "1"
+TEST_MODE = False
 DATA_DIR = os.environ.get("SLCOSMO_DATA_DIR", os.path.join("..", "slcosmo"))
 OTHER_FORECAST_DIR = os.environ.get("OTHER_FORECAST_DIR", os.path.join("..", "SLCOSMO", "other_forecast"))
 

@@ -33,7 +33,7 @@ SEED = 42
 rng_np = np.random.default_rng(SEED)
 np.random.seed(SEED)
 
-TEST_MODE = os.environ.get("COMBINE_FORECAST_TEST") == "1"
+TEST_MODE = False
 RESULT_DIR = Path("/mnt/lustre/tianli/LensedUniverse_result")
 RESULT_DIR.mkdir(parents=True, exist_ok=True)
 FIG_DIR = Path("result")
