@@ -195,7 +195,7 @@ fp_df = pd.read_csv(DATA_DIR / "db_zBEAMS_PEMD_100000_s1_GDB_phot_err_ManySF_TL.
 zl_fp = fp_df["zL_true"].to_numpy()
 zs_fp = fp_df["zS_true"].to_numpy()
 thetaE_true_fp = fp_df["tE_true"].to_numpy()
-thetaE_err_fp = fp_df["sigma_tE_obs"].to_numpy()
+thetaE_err_fp = 0.01 * thetaE_true_fp
 re_fp = fp_df["r_true"].to_numpy()
 veldisp_true_catalog = fp_df["veldisp_true"].to_numpy()
 vel_frac_err_template = fp_df["sigma_veldisp_obs"].to_numpy() / veldisp_true_catalog
@@ -459,7 +459,7 @@ if TEST_MODE:
 else:
     N_DSPL_USE = 1200
     N_LENS_USE = 5000
-    N_FP_USE = 5000
+    N_FP_USE = 50000
     N_SNE_USE = 50
     N_QUASAR_USE = 500
     num_warmup = 500

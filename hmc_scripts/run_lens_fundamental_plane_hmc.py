@@ -64,14 +64,14 @@ fp_df = pd.read_csv(DATA_CSV)
 if TEST_MODE:
     n_use = 200
 else:
-    n_use = 5000
+    n_use = 50000
 select_idx = rng_np.choice(fp_df.shape[0], size=min(n_use, fp_df.shape[0]), replace=False)
 fp_df = fp_df.iloc[np.sort(select_idx)].reset_index(drop=True)
 
 zl_fp = fp_df["zL_true"].to_numpy()
 zs_fp = fp_df["zS_true"].to_numpy()
 thetaE_true_fp = fp_df["tE_true"].to_numpy()
-thetaE_err_fp = fp_df["sigma_tE_obs"].to_numpy()
+thetaE_err_fp = 0.01 * thetaE_true_fp
 re_fp = fp_df["r_true"].to_numpy()
 veldisp_true_catalog = fp_df["veldisp_true"].to_numpy()
 vel_frac_err_template = fp_df["sigma_veldisp_obs"].to_numpy() / veldisp_true_catalog
