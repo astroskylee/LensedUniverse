@@ -21,14 +21,17 @@ TEST_MODE = False
 DATA_DIR = os.environ.get("SLCOSMO_DATA_DIR", os.path.join("..", "slcosmo"))
 OTHER_FORECAST_DIR = os.environ.get("OTHER_FORECAST_DIR", os.path.join("..", "SLCOSMO", "other_forecast"))
 
-jax.config.update("jax_enable_x64", True)
+USE_X64 = os.environ.get("SLCOSMO_USE_X64", "0").strip().lower() in {"1", "true", "yes", "y", "on"}
+jax.config.update("jax_enable_x64", USE_X64)
 if TEST_MODE:
     print("Test mode: using GPU")
     numpyro.set_platform("gpu")
 else:
     print("GPU connected")
     numpyro.set_platform("gpu")
-numpyro.enable_x64()
+if USE_X64:
+    numpyro.enable_x64()
+print(f"Precision mode: {'FP64' if USE_X64 else 'FP32'}")
 
 slcosmo = SLCOSMO()
 model_instance = SLmodel(slcosmo)

@@ -23,12 +23,15 @@ import arviz as az
 from slcosmo import tool
 from hmc_scripts.corner_utils import select_corner_vars, make_overlay_corner
 
-jax.config.update("jax_enable_x64", True)
-numpyro.enable_x64()
+USE_X64 = os.environ.get("SLCOSMO_USE_X64", "0").strip().lower() in {"1", "true", "yes", "y", "on"}
+jax.config.update("jax_enable_x64", USE_X64)
+if USE_X64:
+    numpyro.enable_x64()
 if any(d.platform == "gpu" for d in jax.devices()):
     numpyro.set_platform("gpu")
 else:
     numpyro.set_platform("cpu")
+print(f"[INFO] Precision mode: {'FP64' if USE_X64 else 'FP32'}", flush=True)
 
 SEED = 42
 rng_np = np.random.default_rng(SEED)
