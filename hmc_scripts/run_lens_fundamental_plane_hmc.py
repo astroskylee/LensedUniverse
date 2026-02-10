@@ -177,7 +177,7 @@ def fundamental_plane_model(fp_data):
         )
         numpyro.sample(
             "vel_fp_like",
-            dist.TruncatedNormal(vel_pred_fp, fp_data["vel_err"], low=50.0, high=400.0),
+            dist.TruncatedNormal(vel_pred_fp, fp_data["vel_err"], low=50.0, high=500.0),
             obs=fp_data["vel_obs"],
         )
 

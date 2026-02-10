@@ -605,7 +605,7 @@ def joint_model(dspl_data=None, lens_data=None, fp_data=None, sne_data=None, qua
             )
             numpyro.sample(
                 "vel_fp_like",
-                dist.TruncatedNormal(vel_pred_fp, fp_data["vel_err"], low=50.0, high=400.0),
+                dist.TruncatedNormal(vel_pred_fp, fp_data["vel_err"], low=50.0, high=500.0),
                 obs=fp_data["vel_obs"],
             )
 
