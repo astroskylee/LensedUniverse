@@ -16,7 +16,7 @@ import jax
 import jax.numpy as jnp
 import numpyro
 import numpyro.distributions as dist
-from numpyro.infer import NUTS, MCMC
+from numpyro.infer import NUTS, MCMC, init_to_value
 from jax import random
 import arviz as az
 
@@ -244,6 +244,22 @@ def quasar_model(zl, zs, t_obs, t_err, phi_obs, phi_err, phi_scale, lambda_obs, 
         numpyro.sample("t_delay_like", dist.Normal(t_model_days, t_err), obs=t_obs)
 
 
+def build_init_values(quasar_data):
+    lambda_true = np.asarray(quasar_data["lambda_obs"], dtype=np.float64)
+    lambda_true = np.clip(lambda_true, 0.801, 1.199)
+    phi_true_scaled = np.asarray(quasar_data["phi_obs"], dtype=np.float64)
+    return {
+        "Omegam": jnp.asarray(cosmo_true["Omegam"]),
+        "w0": jnp.asarray(cosmo_true["w0"]),
+        "wa": jnp.asarray(cosmo_true["wa"]),
+        "h0": jnp.asarray(cosmo_true["h0"]),
+        "lambda_mean": jnp.asarray(1.0),
+        "lambda_sigma": jnp.asarray(0.08),
+        "lambda_true": jnp.asarray(lambda_true),
+        "phi_true_scaled": jnp.asarray(phi_true_scaled),
+    }
+
+
 def run_mcmc(data, key, tag):
     step(f"Run MCMC for quasar ({tag})")
     if TEST_MODE:
@@ -251,7 +267,11 @@ def run_mcmc(data, key, tag):
     else:
         num_warmup, num_samples, num_chains, chain_method = 500, 1000, 4, "vectorized"
 
-    nuts = NUTS(quasar_model, target_accept_prob=0.95)
+    nuts = NUTS(
+        quasar_model,
+        target_accept_prob=0.95,
+        init_strategy=init_to_value(values=build_init_values(data)),
+    )
     mcmc = MCMC(
         nuts,
         num_warmup=num_warmup,

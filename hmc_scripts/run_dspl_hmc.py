@@ -15,7 +15,7 @@ import jax
 import jax.numpy as jnp
 import numpyro
 import numpyro.distributions as dist
-from numpyro.infer import NUTS, MCMC
+from numpyro.infer import NUTS, MCMC, init_to_value
 from jax import random
 import arviz as az
 
@@ -183,6 +183,25 @@ def dspl_model(dspl_data):
         numpyro.sample("beta_dspl_like", dist.TruncatedNormal(beta_mst, dspl_data["beta_err"], low=0.0, high=1.0), obs=dspl_data["beta_obs"])
 
 
+def build_init_values(dspl_data):
+    zs2_true = np.asarray(dspl_data["zs2_obs"], dtype=np.float64)
+    zs1 = np.asarray(dspl_data["zs1"], dtype=np.float64)
+    zs2_true = np.maximum(zs2_true, zs1 + 1e-3)
+    zs2_true = np.clip(zs2_true, zs1 + 1e-3, 9.999)
+    lambda_dspl = np.asarray(dspl_data["lambda_obs"], dtype=np.float64)
+    lambda_dspl = np.clip(lambda_dspl, 0.801, 1.199)
+    return {
+        "Omegam": jnp.asarray(cosmo_true["Omegam"]),
+        "w0": jnp.asarray(cosmo_true["w0"]),
+        "wa": jnp.asarray(cosmo_true["wa"]),
+        "h0": jnp.asarray(cosmo_true["h0"]),
+        "lambda_mean": jnp.asarray(1.0),
+        "lambda_sigma": jnp.asarray(0.08),
+        "zs2_true": jnp.asarray(zs2_true),
+        "lambda_dspl": jnp.asarray(lambda_dspl),
+    }
+
+
 def run_mcmc(data, key, tag):
     step(f"Run MCMC for DSPL ({tag})")
     if TEST_MODE:
@@ -190,7 +209,11 @@ def run_mcmc(data, key, tag):
     else:
         num_warmup, num_samples, num_chains, chain_method = 500, 1500, 4, "vectorized"
 
-    nuts = NUTS(dspl_model, target_accept_prob=0.95)
+    nuts = NUTS(
+        dspl_model,
+        target_accept_prob=0.95,
+        init_strategy=init_to_value(values=build_init_values(data)),
+    )
     mcmc = MCMC(
         nuts,
         num_warmup=num_warmup,

@@ -16,7 +16,7 @@ import jax
 import jax.numpy as jnp
 import numpyro
 import numpyro.distributions as dist
-from numpyro.infer import NUTS, MCMC
+from numpyro.infer import NUTS, MCMC, init_to_value
 from jax import random
 import arviz as az
 
@@ -184,6 +184,23 @@ def sne_model(zl, zs, t_obs, phi_obs, lambda_obs, lambda_err, phi_scale, sigma_t
         numpyro.sample("t_delay_like", dist.Normal(t_model_days, sigma_t_days), obs=t_obs)
 
 
+def build_init_values(sne_data):
+    lambda_true = np.asarray(sne_data["lambda_obs"], dtype=np.float64)
+    lambda_true = np.clip(lambda_true, 0.801, 1.199)
+    phi_true_scaled = np.asarray(sne_data["phi_obs"], dtype=np.float64)
+    phi_true_scaled = np.clip(phi_true_scaled, 1e-3, 9.999)
+    return {
+        "Omegam": jnp.asarray(cosmo_true["Omegam"]),
+        "w0": jnp.asarray(cosmo_true["w0"]),
+        "wa": jnp.asarray(cosmo_true["wa"]),
+        "h0": jnp.asarray(cosmo_true["h0"]),
+        "lambda_mean": jnp.asarray(1.0),
+        "lambda_sigma": jnp.asarray(0.08),
+        "phi_true_scaled": jnp.asarray(phi_true_scaled),
+        "lambda_true": jnp.asarray(lambda_true),
+    }
+
+
 def run_mcmc(data, key, tag):
     step(f"Run MCMC for SNe ({tag})")
     if TEST_MODE:
@@ -191,7 +208,11 @@ def run_mcmc(data, key, tag):
     else:
         num_warmup, num_samples, num_chains, chain_method = 500, 1000, 4, "vectorized"
 
-    nuts = NUTS(sne_model, target_accept_prob=0.95)
+    nuts = NUTS(
+        sne_model,
+        target_accept_prob=0.95,
+        init_strategy=init_to_value(values=build_init_values(data)),
+    )
     mcmc = MCMC(
         nuts,
         num_warmup=num_warmup,

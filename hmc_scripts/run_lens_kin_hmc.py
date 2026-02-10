@@ -15,7 +15,7 @@ import jax
 import jax.numpy as jnp
 import numpyro
 import numpyro.distributions as dist
-from numpyro.infer import NUTS, MCMC
+from numpyro.infer import NUTS, MCMC, init_to_value
 from jax import random
 import arviz as az
 
@@ -160,6 +160,31 @@ def lens_model(lens_data):
         numpyro.sample("vel_lens_like", dist.Normal(vel_pred, lens_data["vel_err"]), obs=lens_data["vel_obs"])
 
 
+def build_init_values(lens_data):
+    gamma_i = np.asarray(lens_data["gamma_obs"], dtype=np.float64)
+    gamma_i = np.clip(gamma_i, 1.401, 2.599)
+    beta_i = np.zeros_like(gamma_i, dtype=np.float64)
+    lambda_lens = np.ones_like(gamma_i, dtype=np.float64)
+    theta_E_i = np.asarray(lens_data["theta_E"], dtype=np.float64)
+    theta_E_i = np.maximum(theta_E_i, 1e-3)
+    return {
+        "Omegam": jnp.asarray(cosmo_true["Omegam"]),
+        "w0": jnp.asarray(cosmo_true["w0"]),
+        "wa": jnp.asarray(cosmo_true["wa"]),
+        "h0": jnp.asarray(cosmo_true["h0"]),
+        "lambda_mean": jnp.asarray(1.0),
+        "lambda_sigma": jnp.asarray(0.08),
+        "gamma_mean": jnp.asarray(2.0),
+        "gamma_sigma": jnp.asarray(0.25),
+        "beta_mean": jnp.asarray(0.0),
+        "beta_sigma": jnp.asarray(0.25),
+        "gamma_i": jnp.asarray(gamma_i),
+        "beta_i": jnp.asarray(beta_i),
+        "lambda_lens": jnp.asarray(lambda_lens),
+        "theta_E_i": jnp.asarray(theta_E_i),
+    }
+
+
 def run_mcmc(data, key, tag):
     step(f"Run MCMC for lens+kin ({tag})")
     if TEST_MODE:
@@ -167,7 +192,11 @@ def run_mcmc(data, key, tag):
     else:
         num_warmup, num_samples, num_chains, chain_method = 500, 1500, 4, "vectorized"
 
-    nuts = NUTS(lens_model, target_accept_prob=0.95)
+    nuts = NUTS(
+        lens_model,
+        target_accept_prob=0.95,
+        init_strategy=init_to_value(values=build_init_values(data)),
+    )
     mcmc = MCMC(
         nuts,
         num_warmup=num_warmup,

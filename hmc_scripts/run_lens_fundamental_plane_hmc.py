@@ -16,7 +16,7 @@ import jax
 import jax.numpy as jnp
 import numpyro
 import numpyro.distributions as dist
-from numpyro.infer import NUTS, MCMC, init_to_median, init_to_value
+from numpyro.infer import NUTS, MCMC, init_to_value
 from jax import random
 import arviz as az
 from astropy.cosmology import Planck18
@@ -310,96 +310,40 @@ def fundamental_plane_model(fp_data):
         )
 
 
-def diagnose_fp_data(fp_data, tag):
-    print(f"[{tag}] N_lens={len(fp_data['zl'])}")
-    print(
-        f"[{tag}] theta_E min/med/max="
-        f"{np.min(fp_data['theta_E']):.4f}/{np.median(fp_data['theta_E']):.4f}/{np.max(fp_data['theta_E']):.4f}"
-    )
-    print(
-        f"[{tag}] Re(arcsec) min/med/max="
-        f"{np.min(fp_data['re']):.4f}/{np.median(fp_data['re']):.4f}/{np.max(fp_data['re']):.4f}"
-    )
-    print(
-        f"[{tag}] vel_obs min/med/max="
-        f"{np.min(fp_data['vel_obs']):.4f}/{np.median(fp_data['vel_obs']):.4f}/{np.max(fp_data['vel_obs']):.4f}"
-    )
-    print(
-        f"[{tag}] vel_err min/med/max="
-        f"{np.min(fp_data['vel_err']):.4f}/{np.median(fp_data['vel_err']):.4f}/{np.max(fp_data['vel_err']):.4f}"
-    )
-    print(f"[{tag}] vel_obs outside [50, 400]: {int(np.sum((fp_data['vel_obs'] < 50.0) | (fp_data['vel_obs'] > 400.0)))}")
-    print(f"[{tag}] zL<=0 count: {int(np.sum(fp_data['zl'] <= 0.0))}")
-    print(f"[{tag}] zS<=zL count: {int(np.sum(fp_data['zs'] <= fp_data['zl']))}")
-    print(f"[{tag}] theta_E_err<=0 count: {int(np.sum(fp_data['theta_E_err'] <= 0.0))}")
-    print(f"[{tag}] vel_err<=0 count: {int(np.sum(fp_data['vel_err'] <= 0.0))}")
-    print(f"[{tag}] gamma_true finite ratio: {np.mean(np.isfinite(fp_data['gamma_true'])):.4f}")
-    print(f"[{tag}] beta_true finite ratio: {np.mean(np.isfinite(fp_data['beta_true'])):.4f}")
-    print(f"[{tag}] lambda_true finite ratio: {np.mean(np.isfinite(fp_data['lambda_true'])):.4f}")
-
-
 def build_init_values(fp_data):
+    # Keep initial values strictly inside constrained supports to avoid boundary-induced invalid transforms.
+    zl_true = np.asarray(fp_data.get("zl_true", fp_data["zl"]), dtype=np.float64)
+    zs_true = np.asarray(fp_data.get("zs_true", fp_data["zs"]), dtype=np.float64)
+    theta_true = np.asarray(fp_data.get("theta_E_true", fp_data["theta_E"]), dtype=np.float64)
+    gamma_true = np.asarray(fp_data.get("gamma_true", fp_data["gamma_obs"]), dtype=np.float64)
+    beta_true = np.asarray(fp_data.get("beta_true", np.zeros_like(theta_true)), dtype=np.float64)
+    lambda_true = np.asarray(fp_data.get("lambda_true", np.ones_like(theta_true)), dtype=np.float64)
+
+    zl_true = np.maximum(zl_true, 1e-3)
+    zs_true = np.maximum(zs_true, zl_true + 1e-3)
+    theta_true = np.maximum(theta_true, 1e-3)
+    gamma_true = np.clip(gamma_true, 1.401, 2.599)
+    beta_true = np.clip(beta_true, -0.399, 0.399)
+    lambda_true = np.clip(lambda_true, 0.801, 1.199)
+
     return {
         "Omegam": jnp.asarray(cosmo_true["Omegam"]),
         "w0": jnp.asarray(cosmo_true["w0"]),
         "wa": jnp.asarray(cosmo_true["wa"]),
         "h0": jnp.asarray(cosmo_true["h0"]),
         "lambda_mean": jnp.asarray(1.0),
-        "lambda_sigma": jnp.asarray(0.05),
+        "lambda_sigma": jnp.asarray(0.08),
         "gamma_mean": jnp.asarray(2.0),
-        "gamma_sigma": jnp.asarray(0.2),
+        "gamma_sigma": jnp.asarray(0.25),
         "beta_mean": jnp.asarray(0.0),
-        "beta_sigma": jnp.asarray(0.2),
-        "zL_fp_latent": jnp.asarray(fp_data["zl_true"]),
-        "zS_fp_latent": jnp.asarray(fp_data["zs_true"]),
-        "gamma_fp": jnp.asarray(fp_data["gamma_true"]),
-        "beta_fp": jnp.asarray(fp_data["beta_true"]),
-        "lambda_fp": jnp.asarray(fp_data["lambda_true"]),
-        "thetaE_fp": jnp.asarray(fp_data["theta_E_true"]),
+        "beta_sigma": jnp.asarray(0.25),
+        "zL_fp_latent": jnp.asarray(zl_true),
+        "zS_fp_latent": jnp.asarray(zs_true),
+        "gamma_fp": jnp.asarray(gamma_true),
+        "beta_fp": jnp.asarray(beta_true),
+        "lambda_fp": jnp.asarray(lambda_true),
+        "thetaE_fp": jnp.asarray(theta_true),
     }
-
-
-def probe_init_strategy(fp_data, key, tag):
-    probe_default = MCMC(
-        NUTS(fundamental_plane_model, target_accept_prob=0.95),
-        num_warmup=1,
-        num_samples=1,
-        num_chains=1,
-        chain_method="sequential",
-        progress_bar=False,
-    )
-    try:
-        probe_default.run(key, fp_data=fp_data)
-        print(f"[{tag}] init probe default: ok")
-    except RuntimeError as e:
-        print(f"[{tag}] init probe default failed: {e}")
-
-    probe_median = MCMC(
-        NUTS(fundamental_plane_model, target_accept_prob=0.95, init_strategy=init_to_median(num_samples=25)),
-        num_warmup=1,
-        num_samples=1,
-        num_chains=1,
-        chain_method="sequential",
-        progress_bar=False,
-    )
-    probe_median.run(key, fp_data=fp_data)
-    print(f"[{tag}] init probe median: ok")
-
-    probe_true = MCMC(
-        NUTS(
-            fundamental_plane_model,
-            target_accept_prob=0.95,
-            init_strategy=init_to_value(values=build_init_values(fp_data)),
-        ),
-        num_warmup=1,
-        num_samples=1,
-        num_chains=1,
-        chain_method="sequential",
-        progress_bar=False,
-    )
-    probe_true.run(key, fp_data=fp_data)
-    print(f"[{tag}] init probe true-value: ok")
-
 
 def run_mcmc(data, key, tag):
     step(f"Run MCMC for lens fundamental-plane ({tag})")
@@ -422,6 +366,7 @@ def run_mcmc(data, key, tag):
         progress_bar=True,
     )
     mcmc.run(key, fp_data=data)
+    print(f"[{tag}] run uses init_to_value")
     extra = mcmc.get_extra_fields(group_by_chain=True)
     n_div = int(np.asarray(extra["diverging"]).sum())
     print(f"[{tag}] divergences: {n_div}")
@@ -442,12 +387,6 @@ def run_mcmc(data, key, tag):
 
 key = random.PRNGKey(42)
 key_clean, key_noisy = random.split(key)
-
-step("Diagnose fundamental-plane data and initialization")
-diagnose_fp_data(fp_data_clean, "clean")
-diagnose_fp_data(fp_data_noisy, "noisy")
-probe_init_strategy(fp_data_clean, random.PRNGKey(123), "clean")
-probe_init_strategy(fp_data_noisy, random.PRNGKey(456), "noisy")
 
 step("Execute clean and noisy runs")
 idata_clean = run_mcmc(fp_data_clean, key_clean, "clean")

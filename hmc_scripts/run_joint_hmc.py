@@ -17,7 +17,7 @@ import jax
 import jax.numpy as jnp
 import numpyro
 import numpyro.distributions as dist
-from numpyro.infer import NUTS, MCMC
+from numpyro.infer import NUTS, MCMC, init_to_value
 from jax import random
 import arviz as az
 from astropy.cosmology import Planck18
@@ -771,9 +771,93 @@ def joint_model(dspl_data=None, lens_data=None, fp_data=None, sne_data=None, qua
             numpyro.sample("t_delay_q_like", dist.Normal(t_model_days, t_err), obs=t_obs)
 
 
+def build_init_values(data):
+    init_values = {
+        "Omegam": jnp.asarray(cosmo_true["Omegam"]),
+        "w0": jnp.asarray(cosmo_true["w0"]),
+        "wa": jnp.asarray(cosmo_true["wa"]),
+        "h0": jnp.asarray(cosmo_true["h0"]),
+        "lambda_mean": jnp.asarray(1.0),
+        "lambda_sigma": jnp.asarray(0.08),
+        "gamma_mean": jnp.asarray(2.0),
+        "gamma_sigma": jnp.asarray(0.25),
+        "beta_mean": jnp.asarray(0.0),
+        "beta_sigma": jnp.asarray(0.25),
+    }
+
+    dspl_data = data.get("dspl")
+    if dspl_data is not None:
+        zs2_true = np.asarray(dspl_data["zs2_obs"], dtype=np.float64)
+        zs1 = np.asarray(dspl_data["zs1"], dtype=np.float64)
+        zs2_true = np.maximum(zs2_true, zs1 + 1e-3)
+        zs2_true = np.clip(zs2_true, zs1 + 1e-3, 9.999)
+        lambda_dspl = np.asarray(dspl_data["lambda_obs"], dtype=np.float64)
+        lambda_dspl = np.clip(lambda_dspl, 0.801, 1.199)
+        init_values["zs2_true"] = jnp.asarray(zs2_true)
+        init_values["lambda_dspl"] = jnp.asarray(lambda_dspl)
+
+    lens_data = data.get("lens")
+    if lens_data is not None:
+        gamma_i = np.asarray(lens_data["gamma_obs"], dtype=np.float64)
+        gamma_i = np.clip(gamma_i, 1.401, 2.599)
+        beta_i = np.zeros_like(gamma_i, dtype=np.float64)
+        lambda_lens = np.ones_like(gamma_i, dtype=np.float64)
+        theta_E_i = np.asarray(lens_data["theta_E"], dtype=np.float64)
+        theta_E_i = np.maximum(theta_E_i, 1e-3)
+        init_values["gamma_i"] = jnp.asarray(gamma_i)
+        init_values["beta_i"] = jnp.asarray(beta_i)
+        init_values["lambda_lens"] = jnp.asarray(lambda_lens)
+        init_values["theta_E_i"] = jnp.asarray(theta_E_i)
+
+    fp_data = data.get("fp")
+    if fp_data is not None:
+        zl_true = np.asarray(fp_data["zl"], dtype=np.float64)
+        zs_true = np.asarray(fp_data["zs"], dtype=np.float64)
+        zl_true = np.maximum(zl_true, 1e-3)
+        zs_true = np.maximum(zs_true, zl_true + 1e-3)
+        theta_true = np.asarray(fp_data["theta_E"], dtype=np.float64)
+        theta_true = np.maximum(theta_true, 1e-3)
+        gamma_obs = np.asarray(fp_data["gamma_obs"], dtype=np.float64)
+        gamma_mask = np.asarray(fp_data["gamma_has_obs"], dtype=bool)
+        gamma_fp = np.where(gamma_mask, gamma_obs, 2.0)
+        gamma_fp = np.clip(gamma_fp, 1.401, 2.599)
+        beta_fp = np.zeros_like(gamma_fp, dtype=np.float64)
+        lambda_fp = np.ones_like(gamma_fp, dtype=np.float64)
+        lambda_fp = np.clip(lambda_fp, 0.801, 1.199)
+        init_values["zL_fp_latent"] = jnp.asarray(zl_true)
+        init_values["zS_fp_latent"] = jnp.asarray(zs_true)
+        init_values["gamma_fp"] = jnp.asarray(gamma_fp)
+        init_values["beta_fp"] = jnp.asarray(beta_fp)
+        init_values["lambda_fp"] = jnp.asarray(lambda_fp)
+        init_values["thetaE_fp"] = jnp.asarray(theta_true)
+
+    sne_data = data.get("sne")
+    if sne_data is not None:
+        phi_true_scaled_sne = np.asarray(sne_data["phi_obs"], dtype=np.float64)
+        phi_true_scaled_sne = np.clip(phi_true_scaled_sne, 1e-3, 9.999)
+        lambda_sne = np.asarray(sne_data["lambda_obs"], dtype=np.float64)
+        lambda_sne = np.clip(lambda_sne, 0.801, 1.199)
+        init_values["phi_true_scaled_sne"] = jnp.asarray(phi_true_scaled_sne)
+        init_values["lambda_sne"] = jnp.asarray(lambda_sne)
+
+    quasar_data = data.get("quasar")
+    if quasar_data is not None:
+        phi_true_scaled_q = np.asarray(quasar_data["phi_obs"], dtype=np.float64)
+        lambda_q = np.asarray(quasar_data["lambda_obs"], dtype=np.float64)
+        lambda_q = np.clip(lambda_q, 0.801, 1.199)
+        init_values["phi_true_scaled_q"] = jnp.asarray(phi_true_scaled_q)
+        init_values["lambda_q"] = jnp.asarray(lambda_q)
+
+    return init_values
+
+
 def run_mcmc(data, key, tag):
     step(f"Run joint MCMC ({tag})")
-    nuts = NUTS(joint_model, target_accept_prob=0.95)
+    nuts = NUTS(
+        joint_model,
+        target_accept_prob=0.95,
+        init_strategy=init_to_value(values=build_init_values(data)),
+    )
     mcmc = MCMC(
         nuts,
         num_warmup=num_warmup,
