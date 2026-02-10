@@ -67,6 +67,10 @@ beta_grid = np.linspace(-0.5, 0.8, N4)
 jampy_interp = tool.make_4d_interpolant(thetaE_grid, gamma_grid, Re_grid, beta_grid, LUT)
 
 fp_df = pd.read_csv(DATA_CSV)
+vel_frac_err_full = fp_df["sigma_veldisp_obs"].to_numpy() / fp_df["veldisp_true"].to_numpy()
+fp_keep_mask = np.isfinite(vel_frac_err_full) & (vel_frac_err_full <= 0.3)
+fp_df = fp_df.loc[fp_keep_mask].reset_index(drop=True)
+step(f"Filtered FP catalog by vel_frac_err<=0.3: keep {fp_df.shape[0]} targets")
 if TEST_MODE:
     n_use = 200
 else:
@@ -171,7 +175,11 @@ def fundamental_plane_model(fp_data):
             dist.Normal(gamma_fp, fp_data["gamma_err"]).mask(gamma_obs_mask),
             obs=gamma_obs_used,
         )
-        numpyro.sample("vel_fp_like", dist.Normal(vel_pred_fp, fp_data["vel_err"]), obs=fp_data["vel_obs"])
+        numpyro.sample(
+            "vel_fp_like",
+            dist.TruncatedNormal(vel_pred_fp, fp_data["vel_err"], low=50.0, high=400.0),
+            obs=fp_data["vel_obs"],
+        )
 
 
 def run_mcmc(data, key, tag):

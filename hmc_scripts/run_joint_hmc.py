@@ -200,6 +200,10 @@ lens_noisy = build_lens(gamma_obs_noisy, thetaE_obs_noisy, vel_obs_noisy)
 # ---------------------------
 step("Build fundamental-plane clean/noisy datasets")
 fp_df = pd.read_csv(DATA_DIR / "db_zBEAMS_PEMD_100000_s1_GDB_phot_err_ManySF_TL.csv")
+vel_frac_err_full_fp = fp_df["sigma_veldisp_obs"].to_numpy() / fp_df["veldisp_true"].to_numpy()
+fp_keep_mask = np.isfinite(vel_frac_err_full_fp) & (vel_frac_err_full_fp <= 0.3)
+fp_df = fp_df.loc[fp_keep_mask].reset_index(drop=True)
+step(f"Filtered FP catalog by vel_frac_err<=0.3: keep {fp_df.shape[0]} targets")
 if TEST_MODE:
     n_fp_pool = 200
 else:
@@ -599,7 +603,11 @@ def joint_model(dspl_data=None, lens_data=None, fp_data=None, sne_data=None, qua
                 dist.Normal(gamma_fp, fp_data["gamma_err"]).mask(gamma_obs_mask_fp),
                 obs=gamma_obs_used_fp,
             )
-            numpyro.sample("vel_fp_like", dist.Normal(vel_pred_fp, fp_data["vel_err"]), obs=fp_data["vel_obs"])
+            numpyro.sample(
+                "vel_fp_like",
+                dist.TruncatedNormal(vel_pred_fp, fp_data["vel_err"], low=50.0, high=400.0),
+                obs=fp_data["vel_obs"],
+            )
 
     if sne_data is not None:
         Dl_sne, Ds_sne, Dls_sne = tool.dldsdls(sne_data["zl"], sne_data["zs"], cosmo, n=20)
