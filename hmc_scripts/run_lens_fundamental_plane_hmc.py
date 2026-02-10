@@ -19,8 +19,6 @@ import numpyro.distributions as dist
 from numpyro.infer import NUTS, MCMC, init_to_value
 from jax import random
 import arviz as az
-from astropy.cosmology import Planck18
-import astropy.units as u
 
 from slcosmo import tool
 from hmc_scripts.corner_utils import select_corner_vars, make_overlay_corner
@@ -85,26 +83,18 @@ zs_fp = fp_df["zS_true"].to_numpy()
 zL_sigma_fp = np.abs(fp_df["sigma_zL_obs"].to_numpy())
 zS_sigma_fp = np.abs(fp_df["sigma_zS_obs"].to_numpy())
 thetaE_true_fp = fp_df["tE_true"].to_numpy()
-re_kpc_fp = fp_df["r_true"].to_numpy()
-da_kpc_fp = Planck18.angular_diameter_distance(zl_fp).to(u.kpc).value
-re_fp = (re_kpc_fp / da_kpc_fp) * 206265.0
 veldisp_true_catalog = fp_df["veldisp_true"].to_numpy()
 vel_frac_err_template = fp_df["sigma_veldisp_obs"].to_numpy() / veldisp_true_catalog
 
+# Build Re_true directly from veldisp_true by linear compression to [0.5, 2.8] arcsec.
+vel_min = np.min(veldisp_true_catalog)
+vel_max = np.max(veldisp_true_catalog)
+re_fp = 0.5 + (veldisp_true_catalog - vel_min) * (2.8 - 0.5) / (vel_max - vel_min)
 step(
-    "Re_arcsec before cuts: "
-    f"min={re_fp.min():.4f}, median={np.median(re_fp):.4f}, max={re_fp.max():.4f}"
+    "Re_true from linear veldisp mapping: "
+    f"vmin={vel_min:.3f}, vmax={vel_max:.3f}, "
+    f"re_min={re_fp.min():.4f}, re_median={np.median(re_fp):.4f}, re_max={re_fp.max():.4f}"
 )
-re_keep_mask = re_fp <= 2.8
-step(f"Keep {int(re_keep_mask.sum())}/{re_keep_mask.size} FP systems after Re_arcsec<=2.8 cut")
-zl_fp = zl_fp[re_keep_mask]
-zs_fp = zs_fp[re_keep_mask]
-zL_sigma_fp = zL_sigma_fp[re_keep_mask]
-zS_sigma_fp = zS_sigma_fp[re_keep_mask]
-thetaE_true_fp = thetaE_true_fp[re_keep_mask]
-re_fp = re_fp[re_keep_mask]
-veldisp_true_catalog = veldisp_true_catalog[re_keep_mask]
-vel_frac_err_template = vel_frac_err_template[re_keep_mask]
 
 theta_keep_mask = thetaE_true_fp <= 2.5
 step(f"Keep {int(theta_keep_mask.sum())}/{theta_keep_mask.size} FP systems after thetaE_true<=2.5 cut")
