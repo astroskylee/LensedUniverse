@@ -67,16 +67,13 @@ beta_grid = np.linspace(-0.5, 0.8, N4)
 jampy_interp = tool.make_4d_interpolant(thetaE_grid, gamma_grid, Re_grid, beta_grid, LUT)
 
 fp_df = pd.read_csv(DATA_CSV)
-vel_frac_err_full = fp_df["sigma_veldisp_obs"].to_numpy() / fp_df["veldisp_true"].to_numpy()
-fp_keep_mask = np.isfinite(vel_frac_err_full) & (vel_frac_err_full <= 0.3)
-fp_df = fp_df.loc[fp_keep_mask].reset_index(drop=True)
-step(f"Filtered FP catalog by vel_frac_err<=0.3: keep {fp_df.shape[0]} targets")
 if TEST_MODE:
     n_use = 200
 else:
-    n_use = 50000
+    n_use = 100000
 select_idx = rng_np.choice(fp_df.shape[0], size=min(n_use, fp_df.shape[0]), replace=False)
 fp_df = fp_df.iloc[np.sort(select_idx)].reset_index(drop=True)
+step(f"Sampled {fp_df.shape[0]} FP systems before observation cuts")
 
 zl_fp = fp_df["zL_true"].to_numpy()
 zs_fp = fp_df["zS_true"].to_numpy()
@@ -91,21 +88,40 @@ step("Build clean/noisy mock fundamental-plane observables")
 gamma_true_fp = tool.truncated_normal(2.0, 0.2, 1.5, 2.5, zl_fp.size, random_state=rng_np)
 beta_true_fp = tool.truncated_normal(0.0, 0.2, -0.4, 0.4, zl_fp.size, random_state=rng_np)
 lambda_true_fp = tool.truncated_normal(1.0, 0.05, 0.8, 1.2, zl_fp.size, random_state=rng_np)
-gamma_err_fp = np.full(zl_fp.size, 0.2)
-n_gamma_obs = min(10000, zl_fp.size)
-gamma_has_obs = np.zeros(zl_fp.size, dtype=bool)
-gamma_obs_idx = rng_np.choice(zl_fp.size, size=n_gamma_obs, replace=False)
-gamma_has_obs[gamma_obs_idx] = True
 vel_model_fp = jampy_interp(thetaE_true_fp, gamma_true_fp, re_fp, beta_true_fp) * jnp.sqrt(ds_fp_true / dls_fp_true)
 vel_true_fp = np.asarray(vel_model_fp) * np.sqrt(lambda_true_fp)
 vel_err_fp = vel_frac_err_template * np.abs(vel_true_fp)
 
 thetaE_obs_clean_fp = thetaE_true_fp.copy()
 vel_obs_clean_fp = vel_true_fp.copy()
+thetaE_obs_noisy_fp = thetaE_true_fp + rng_np.normal(0.0, thetaE_err_fp)
+vel_obs_noisy_fp = tool.truncated_normal(vel_true_fp, vel_err_fp, 100.0, 400.0, random_state=rng_np)
+
+obs_range_mask_fp = (vel_obs_noisy_fp >= 100.0) & (vel_obs_noisy_fp <= 400.0)
+frac_unc_fp = vel_err_fp / np.abs(vel_obs_noisy_fp)
+frac_mask_fp = np.isfinite(frac_unc_fp) & (frac_unc_fp <= 0.3)
+fp_keep_mask = obs_range_mask_fp & frac_mask_fp
+step(f"Keep {int(fp_keep_mask.sum())}/{fp_keep_mask.size} FP systems after vel_obs and fractional-error cuts")
+
+zl_fp = zl_fp[fp_keep_mask]
+zs_fp = zs_fp[fp_keep_mask]
+thetaE_true_fp = thetaE_true_fp[fp_keep_mask]
+thetaE_err_fp = thetaE_err_fp[fp_keep_mask]
+re_fp = re_fp[fp_keep_mask]
+gamma_true_fp = gamma_true_fp[fp_keep_mask]
+vel_err_fp = vel_err_fp[fp_keep_mask]
+thetaE_obs_clean_fp = thetaE_obs_clean_fp[fp_keep_mask]
+vel_obs_clean_fp = vel_obs_clean_fp[fp_keep_mask]
+thetaE_obs_noisy_fp = thetaE_obs_noisy_fp[fp_keep_mask]
+vel_obs_noisy_fp = vel_obs_noisy_fp[fp_keep_mask]
+
+gamma_err_fp = np.full(zl_fp.size, 0.2)
+n_gamma_obs = min(10000, zl_fp.size)
+gamma_has_obs = np.zeros(zl_fp.size, dtype=bool)
+gamma_obs_idx = rng_np.choice(zl_fp.size, size=n_gamma_obs, replace=False)
+gamma_has_obs[gamma_obs_idx] = True
 gamma_obs_clean_fp = np.zeros(zl_fp.size)
 gamma_obs_clean_fp[gamma_has_obs] = gamma_true_fp[gamma_has_obs]
-thetaE_obs_noisy_fp = thetaE_true_fp + rng_np.normal(0.0, thetaE_err_fp)
-vel_obs_noisy_fp = rng_np.normal(vel_true_fp, vel_err_fp)
 gamma_obs_noisy_fp = np.zeros(zl_fp.size)
 gamma_obs_noisy_fp[gamma_has_obs] = gamma_true_fp[gamma_has_obs] + rng_np.normal(0.0, gamma_err_fp[gamma_has_obs])
 
@@ -177,7 +193,7 @@ def fundamental_plane_model(fp_data):
         )
         numpyro.sample(
             "vel_fp_like",
-            dist.TruncatedNormal(vel_pred_fp, fp_data["vel_err"], low=50.0, high=500.0),
+            dist.TruncatedNormal(vel_pred_fp, fp_data["vel_err"], low=50.0, high=400.0),
             obs=fp_data["vel_obs"],
         )
 
