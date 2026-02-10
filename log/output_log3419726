@@ -1,0 +1,7 @@
+Currently Loaded Modulefiles: 1) services/slurm <aL> 3) git/2.48.0 2) system/intel64(default) 4) anaconda3/2024.02 Key: (symbolic-version) <module-tag> <aL>=auto-loaded
+[STEP] Load lookup table and fundamental-plane catalog
+[STEP] Sampled 100000 FP systems before observation cuts
+[STEP] Build clean/noisy mock fundamental-plane observables
+[STEP] Keep 52941/100000 FP systems after vel_obs and fractional-error cuts
+[STEP] Execute clean and noisy runs
+[STEP] Run MCMC for lens fundamental-plane (clean)

@@ -1,0 +1,36 @@
+/users/tianli/LensedUniverse/hmc_scripts/run_lens_fundamental_plane_hmc.py:217: UserWarning: Site vel_fp_like: Out-of-support values provided to log prob method. The value argument should be within the support.
+  mcmc.run(key, fp_data=data)
+Traceback (most recent call last):
+  File "/users/tianli/LensedUniverse/hmc_scripts/run_lens_fundamental_plane_hmc.py", line 240, in <module>
+    idata_clean = run_mcmc(fp_data_clean, key_clean, "clean")
+  File "/users/tianli/LensedUniverse/hmc_scripts/run_lens_fundamental_plane_hmc.py", line 217, in run_mcmc
+    mcmc.run(key, fp_data=data)
+    ~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/mnt/lustre2/shared_conda/envs/tianli/herculens_tian/lib/python3.13/site-packages/numpyro/infer/mcmc.py", line 713, in run
+    states, last_state = partial_map_fn(map_args)
+                         ~~~~~~~~~~~~~~^^^^^^^^^^
+  File "/mnt/lustre2/shared_conda/envs/tianli/herculens_tian/lib/python3.13/site-packages/numpyro/infer/mcmc.py", line 465, in _single_chain_mcmc
+    new_init_state = self.sampler.init(
+        rng_key,
+    ...<3 lines>...
+        model_kwargs=kwargs,
+    )
+  File "/mnt/lustre2/shared_conda/envs/tianli/herculens_tian/lib/python3.13/site-packages/numpyro/infer/hmc.py", line 751, in init
+    init_params = self._init_state(
+        rng_key_init_model, model_args, model_kwargs, init_params
+    )
+  File "/mnt/lustre2/shared_conda/envs/tianli/herculens_tian/lib/python3.13/site-packages/numpyro/infer/hmc.py", line 695, in _init_state
+    ) = initialize_model(
+        ~~~~~~~~~~~~~~~~^
+        rng_key,
+        ^^^^^^^^
+    ...<5 lines>...
+        forward_mode_differentiation=self._forward_mode_differentiation,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/mnt/lustre2/shared_conda/envs/tianli/herculens_tian/lib/python3.13/site-packages/numpyro/infer/util.py", line 796, in initialize_model
+    raise RuntimeError(
+        "Cannot find valid initial parameters. Please check your model again."
+    )
+RuntimeError: Cannot find valid initial parameters. Please check your model again.
