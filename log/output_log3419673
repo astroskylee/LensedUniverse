@@ -1,0 +1,53 @@
+Currently Loaded Modulefiles: 1) services/slurm <aL> 3) git/2.48.0 2) system/intel64(default) 4) anaconda3/2024.02 Key: (symbolic-version) <module-tag> <aL>=auto-loaded
+[STEP] Run lens fundamental-plane HMC
+[STEP] Load lookup table and fundamental-plane catalog
+[STEP] Filtered FP catalog by vel_frac_err<=0.3: keep 63559 targets
+[STEP] Build clean/noisy mock fundamental-plane observables
+[STEP] Execute clean and noisy runs
+[STEP] Run MCMC for lens fundamental-plane (clean)
+[STEP] Run lens+kinematic HMC
+[STEP] Load lensing lookup table and Euclid lens catalog
+[STEP] Build clean/noisy mock lens+kinematic observables
+[STEP] Execute clean and noisy runs
+[STEP] Run MCMC for lens+kin (clean)
+[clean] divergences: 1
+[STEP] Run MCMC for lens+kin (noisy)
+[noisy] divergences: 87
+[STEP] Create overlay corner plot
+[STEP] Run DSPL HMC
+[STEP] Load DSPL catalog and derive geometric quantities
+[STEP] Build clean/noisy mock DSPL observables
+[STEP] Execute clean and noisy runs
+[STEP] Run MCMC for DSPL (clean)
+[clean] divergences: 0
+[STEP] Run MCMC for DSPL (noisy)
+[noisy] divergences: 0
+[STEP] Create overlay corner plot
+[STEP] Run lensed SNe HMC
+[STEP] Load SNe catalog and distance-delay geometry
+[STEP] Build clean/noisy mock SNe observables
+[STEP] Execute clean and noisy runs
+[STEP] Run MCMC for SNe (clean)
+[clean] divergences: 14
+[STEP] Run MCMC for SNe (noisy)
+[noisy] divergences: 0
+[STEP] Create overlay corner plot
+[STEP] Run lensed quasar HMC
+[STEP] Load quasar block data and build time-delay base vectors
+[STEP] Build clean/noisy mock quasar observables
+[STEP] Execute clean and noisy runs
+[STEP] Run MCMC for quasar (clean)
+[clean] divergences: 28
+[STEP] Run MCMC for quasar (noisy)
+[noisy] divergences: 57
+[STEP] Create overlay corner plot
+[STEP] Run joint HMC
+[STEP] Build DSPL clean/noisy datasets
+[STEP] Build lens+kinematic clean/noisy datasets
+[STEP] Build fundamental-plane clean/noisy datasets
+[STEP] Filtered FP catalog by vel_frac_err<=0.3: keep 63559 targets
+[STEP] Build SNe clean/noisy datasets
+[STEP] Build quasar clean/noisy datasets
+[STEP] Apply per-probe sample limits for this run mode
+[STEP] Execute clean and noisy joint runs
+[STEP] Run joint MCMC (clean)
