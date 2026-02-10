@@ -20,6 +20,8 @@ import numpyro.distributions as dist
 from numpyro.infer import NUTS, MCMC
 from jax import random
 import arviz as az
+from astropy.cosmology import Planck18
+import astropy.units as u
 
 from slcosmo import tool
 from hmc_scripts.corner_utils import select_corner_vars, make_overlay_corner
@@ -210,18 +212,44 @@ else:
 select_idx_fp = rng_np.choice(fp_df.shape[0], size=min(n_fp_pool, fp_df.shape[0]), replace=False)
 fp_df = fp_df.iloc[np.sort(select_idx_fp)].reset_index(drop=True)
 step(f"Sampled {fp_df.shape[0]} FP systems before observation cuts")
-fp_df = fp_df.loc[fp_df["tE_true"] <= 2.5].reset_index(drop=True)
-step(f"Keep {fp_df.shape[0]} FP systems after thetaE_true<=2.5 cut")
 
 zl_fp = fp_df["zL_true"].to_numpy()
 zs_fp = fp_df["zS_true"].to_numpy()
 zL_sigma_fp = np.abs(fp_df["sigma_zL_obs"].to_numpy())
 zS_sigma_fp = np.abs(fp_df["sigma_zS_obs"].to_numpy())
 thetaE_true_fp = fp_df["tE_true"].to_numpy()
-thetaE_err_fp = 0.01 * thetaE_true_fp
-re_fp = fp_df["r_true"].to_numpy()
+re_kpc_fp = fp_df["r_true"].to_numpy()
+da_kpc_fp = Planck18.angular_diameter_distance(zl_fp).to(u.kpc).value
+re_fp = (re_kpc_fp / da_kpc_fp) * 206265.0
 veldisp_true_catalog = fp_df["veldisp_true"].to_numpy()
 vel_frac_err_template = fp_df["sigma_veldisp_obs"].to_numpy() / veldisp_true_catalog
+
+step(
+    "FP Re_arcsec before cuts: "
+    f"min={re_fp.min():.4f}, median={np.median(re_fp):.4f}, max={re_fp.max():.4f}"
+)
+re_keep_mask = re_fp <= 2.8
+step(f"Keep {int(re_keep_mask.sum())}/{re_keep_mask.size} FP systems after Re_arcsec<=2.8 cut")
+zl_fp = zl_fp[re_keep_mask]
+zs_fp = zs_fp[re_keep_mask]
+zL_sigma_fp = zL_sigma_fp[re_keep_mask]
+zS_sigma_fp = zS_sigma_fp[re_keep_mask]
+thetaE_true_fp = thetaE_true_fp[re_keep_mask]
+re_fp = re_fp[re_keep_mask]
+veldisp_true_catalog = veldisp_true_catalog[re_keep_mask]
+vel_frac_err_template = vel_frac_err_template[re_keep_mask]
+
+theta_keep_mask = thetaE_true_fp <= 2.5
+step(f"Keep {int(theta_keep_mask.sum())}/{theta_keep_mask.size} FP systems after thetaE_true<=2.5 cut")
+zl_fp = zl_fp[theta_keep_mask]
+zs_fp = zs_fp[theta_keep_mask]
+zL_sigma_fp = zL_sigma_fp[theta_keep_mask]
+zS_sigma_fp = zS_sigma_fp[theta_keep_mask]
+thetaE_true_fp = thetaE_true_fp[theta_keep_mask]
+re_fp = re_fp[theta_keep_mask]
+veldisp_true_catalog = veldisp_true_catalog[theta_keep_mask]
+vel_frac_err_template = vel_frac_err_template[theta_keep_mask]
+thetaE_err_fp = 0.01 * thetaE_true_fp
 
 _dl_fp_true, ds_fp_true, dls_fp_true = tool.dldsdls(zl_fp, zs_fp, cosmo_true, n=20)
 gamma_true_fp = tool.truncated_normal(2.0, 0.2, 1.5, 2.5, zl_fp.size, random_state=rng_np)
