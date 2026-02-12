@@ -73,12 +73,10 @@ jampy_interp = tool.make_4d_interpolant(thetaE_grid, gamma_grid, Re_grid, beta_g
 
 fp_df = pd.read_csv(DATA_CSV)
 if TEST_MODE:
-    n_use = 200
+    n_use_target = 200
 else:
-    n_use = 100000
-select_idx = rng_np.choice(fp_df.shape[0], size=min(n_use, fp_df.shape[0]), replace=False)
-fp_df = fp_df.iloc[np.sort(select_idx)].reset_index(drop=True)
-step(f"Sampled {fp_df.shape[0]} FP systems before observation cuts")
+    n_use_target = 20000
+step(f"Loaded {fp_df.shape[0]} FP systems before observation cuts")
 
 zl_fp = fp_df["zL_true"].to_numpy()
 zs_fp = fp_df["zS_true"].to_numpy()
@@ -243,6 +241,35 @@ step(
     f"min(zs-zl)={(zs_obs_noisy_fp - zl_obs_noisy_fp).min():.4e}, "
     f"min(zS_low-zL_high)={(zS_low_fp - zL_high_fp).min():.4e}"
 )
+
+n_after_filter = zl_fp.size
+n_use = min(n_use_target, n_after_filter)
+if n_use < n_after_filter:
+    select_idx = np.sort(rng_np.choice(n_after_filter, size=n_use, replace=False))
+    zl_fp = zl_fp[select_idx]
+    zs_fp = zs_fp[select_idx]
+    zL_sigma_fp = zL_sigma_fp[select_idx]
+    zS_sigma_fp = zS_sigma_fp[select_idx]
+    zL_low_fp = zL_low_fp[select_idx]
+    zL_high_fp = zL_high_fp[select_idx]
+    zS_low_fp = zS_low_fp[select_idx]
+    zS_high_fp = zS_high_fp[select_idx]
+    thetaE_true_fp = thetaE_true_fp[select_idx]
+    thetaE_err_fp = thetaE_err_fp[select_idx]
+    re_fp = re_fp[select_idx]
+    gamma_true_fp = gamma_true_fp[select_idx]
+    beta_true_fp = beta_true_fp[select_idx]
+    lambda_true_fp = lambda_true_fp[select_idx]
+    vel_err_fp = vel_err_fp[select_idx]
+    thetaE_obs_clean_fp = thetaE_obs_clean_fp[select_idx]
+    vel_obs_clean_fp = vel_obs_clean_fp[select_idx]
+    thetaE_obs_noisy_fp = thetaE_obs_noisy_fp[select_idx]
+    vel_obs_noisy_fp = vel_obs_noisy_fp[select_idx]
+    zl_obs_clean_fp = zl_obs_clean_fp[select_idx]
+    zs_obs_clean_fp = zs_obs_clean_fp[select_idx]
+    zl_obs_noisy_fp = zl_obs_noisy_fp[select_idx]
+    zs_obs_noisy_fp = zs_obs_noisy_fp[select_idx]
+step(f"Sampled {n_use}/{n_after_filter} FP systems after all filters")
 
 gamma_err_fp = np.full(zl_fp.size, 0.2)
 gamma_has_obs = np.ones(zl_fp.size, dtype=bool)
