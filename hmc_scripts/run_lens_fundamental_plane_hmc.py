@@ -59,6 +59,7 @@ cosmo_prior = {
     "h0_up": 80.0,  "h0_low": 60.0,
     "omegam_up": 0.5, "omegam_low": 0.1,
 }
+Z_SEP_MIN = 0.2
 
 step("Load lookup table and fundamental-plane catalog")
 LUT = np.load(DATA_DIR / "velocity_disp_table.npy")
@@ -162,8 +163,11 @@ vel_obs_clean_fp = vel_obs_clean_fp[noisy_keep_mask]
 thetaE_obs_noisy_fp = thetaE_obs_noisy_fp[noisy_keep_mask]
 vel_obs_noisy_fp = vel_obs_noisy_fp[noisy_keep_mask]
 
-z_true_mask = (zl_fp > 0.0) & (zs_fp > zl_fp)
-step(f"Keep {int(z_true_mask.sum())}/{z_true_mask.size} FP systems after true-z physical cut")
+z_true_mask = (zl_fp > 0.0) & (zs_fp > zl_fp + Z_SEP_MIN)
+step(
+    f"Keep {int(z_true_mask.sum())}/{z_true_mask.size} FP systems after true-z cut "
+    f"(zs-zl>{Z_SEP_MIN:.1f})"
+)
 zl_fp = zl_fp[z_true_mask]
 zs_fp = zs_fp[z_true_mask]
 zL_sigma_fp = zL_sigma_fp[z_true_mask]
@@ -184,15 +188,23 @@ zl_obs_clean_fp = zl_fp.copy()
 zs_obs_clean_fp = zs_fp.copy()
 zl_obs_noisy_fp = zl_fp + rng_np.normal(0.0, zL_sigma_fp)
 zs_obs_noisy_fp = zs_fp + rng_np.normal(0.0, zS_sigma_fp)
-bad_z_mask = (zl_obs_noisy_fp <= 0.0) | (zs_obs_noisy_fp <= 0.0) | (zs_obs_noisy_fp <= zl_obs_noisy_fp)
+bad_z_mask = (
+    (zl_obs_noisy_fp <= 0.0)
+    | (zs_obs_noisy_fp <= 0.0)
+    | (zs_obs_noisy_fp <= zl_obs_noisy_fp + Z_SEP_MIN)
+)
 for _ in range(20):
     if not np.any(bad_z_mask):
         break
     zl_obs_noisy_fp[bad_z_mask] = zl_fp[bad_z_mask] + rng_np.normal(0.0, zL_sigma_fp[bad_z_mask])
     zs_obs_noisy_fp[bad_z_mask] = zs_fp[bad_z_mask] + rng_np.normal(0.0, zS_sigma_fp[bad_z_mask])
-    bad_z_mask = (zl_obs_noisy_fp <= 0.0) | (zs_obs_noisy_fp <= 0.0) | (zs_obs_noisy_fp <= zl_obs_noisy_fp)
+    bad_z_mask = (
+        (zl_obs_noisy_fp <= 0.0)
+        | (zs_obs_noisy_fp <= 0.0)
+        | (zs_obs_noisy_fp <= zl_obs_noisy_fp + Z_SEP_MIN)
+    )
 zl_obs_noisy_fp = np.maximum(zl_obs_noisy_fp, 1e-4)
-zs_obs_noisy_fp = np.maximum(zs_obs_noisy_fp, zl_obs_noisy_fp + 1e-4)
+zs_obs_noisy_fp = np.maximum(zs_obs_noisy_fp, zl_obs_noisy_fp + Z_SEP_MIN + 1e-4)
 step(
     "Noisy z constraints applied: "
     f"zl_min={zl_obs_noisy_fp.min():.4f}, zs_min={zs_obs_noisy_fp.min():.4f}, "
@@ -274,7 +286,7 @@ def fundamental_plane_model(fp_data):
         )
         zS_fp = numpyro.sample(
             "zS_fp_latent",
-            dist.TruncatedNormal(fp_data["zs"], fp_data["zS_err"], low=zL_fp + 1e-4),
+            dist.TruncatedNormal(fp_data["zs"], fp_data["zS_err"], low=zL_fp + Z_SEP_MIN),
         )
     _dl, ds_fp, dls_fp = tool.dldsdls(zL_fp, zS_fp, cosmo, n=20)
 
@@ -310,7 +322,7 @@ def build_init_values(fp_data):
     lambda_true = np.asarray(fp_data.get("lambda_true", np.ones_like(theta_true)), dtype=np.float64)
 
     zl_true = np.maximum(zl_true, 1e-3)
-    zs_true = np.maximum(zs_true, zl_true + 1e-3)
+    zs_true = np.maximum(zs_true, zl_true + Z_SEP_MIN + 1e-3)
     theta_true = np.maximum(theta_true, 1e-3)
     gamma_true = np.clip(gamma_true, 1.401, 2.599)
     beta_true = np.clip(beta_true, -0.399, 0.399)
