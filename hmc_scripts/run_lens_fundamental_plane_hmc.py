@@ -59,7 +59,7 @@ cosmo_prior = {
     "h0_up": 80.0,  "h0_low": 60.0,
     "omegam_up": 0.5, "omegam_low": 0.1,
 }
-Z_SEP_MIN = 0.2
+Z_SIGMA_CLIP = 2.0
 VEL_FRAC_ERR_MAX = 0.30
 
 step("Load lookup table and fundamental-plane catalog")
@@ -179,52 +179,69 @@ vel_obs_clean_fp = vel_obs_clean_fp[noisy_keep_mask]
 thetaE_obs_noisy_fp = thetaE_obs_noisy_fp[noisy_keep_mask]
 vel_obs_noisy_fp = vel_obs_noisy_fp[noisy_keep_mask]
 
-z_true_mask = (zl_fp > 0.0) & (zs_fp > zl_fp + Z_SEP_MIN)
+zL_low_fp = zl_fp - Z_SIGMA_CLIP * zL_sigma_fp
+zL_high_fp = zl_fp + Z_SIGMA_CLIP * zL_sigma_fp
+zS_low_fp = zs_fp - Z_SIGMA_CLIP * zS_sigma_fp
+zS_high_fp = zs_fp + Z_SIGMA_CLIP * zS_sigma_fp
+
+z_lower_pos_mask = (zL_low_fp > 0.0) & (zS_low_fp > 0.0)
+z_sep_sigma_mask = (zs_fp - zl_fp) > (Z_SIGMA_CLIP * zS_sigma_fp + Z_SIGMA_CLIP * zL_sigma_fp)
+z_bounds_disjoint_mask = zS_low_fp > zL_high_fp
+z_prior_mask = z_lower_pos_mask & z_sep_sigma_mask & z_bounds_disjoint_mask
 step(
-    f"Keep {int(z_true_mask.sum())}/{z_true_mask.size} FP systems after true-z cut "
-    f"(zs-zl>{Z_SEP_MIN:.1f})"
+    f"Keep {int(z_prior_mask.sum())}/{z_prior_mask.size} FP systems after z-bound cut "
+    "(z_low>0 and zs-zl>2sigma_zs+2sigma_zl)"
 )
-zl_fp = zl_fp[z_true_mask]
-zs_fp = zs_fp[z_true_mask]
-zL_sigma_fp = zL_sigma_fp[z_true_mask]
-zS_sigma_fp = zS_sigma_fp[z_true_mask]
-thetaE_true_fp = thetaE_true_fp[z_true_mask]
-thetaE_err_fp = thetaE_err_fp[z_true_mask]
-re_fp = re_fp[z_true_mask]
-gamma_true_fp = gamma_true_fp[z_true_mask]
-beta_true_fp = beta_true_fp[z_true_mask]
-lambda_true_fp = lambda_true_fp[z_true_mask]
-vel_err_fp = vel_err_fp[z_true_mask]
-thetaE_obs_clean_fp = thetaE_obs_clean_fp[z_true_mask]
-vel_obs_clean_fp = vel_obs_clean_fp[z_true_mask]
-thetaE_obs_noisy_fp = thetaE_obs_noisy_fp[z_true_mask]
-vel_obs_noisy_fp = vel_obs_noisy_fp[z_true_mask]
+zl_fp = zl_fp[z_prior_mask]
+zs_fp = zs_fp[z_prior_mask]
+zL_sigma_fp = zL_sigma_fp[z_prior_mask]
+zS_sigma_fp = zS_sigma_fp[z_prior_mask]
+zL_low_fp = zL_low_fp[z_prior_mask]
+zL_high_fp = zL_high_fp[z_prior_mask]
+zS_low_fp = zS_low_fp[z_prior_mask]
+zS_high_fp = zS_high_fp[z_prior_mask]
+thetaE_true_fp = thetaE_true_fp[z_prior_mask]
+thetaE_err_fp = thetaE_err_fp[z_prior_mask]
+re_fp = re_fp[z_prior_mask]
+gamma_true_fp = gamma_true_fp[z_prior_mask]
+beta_true_fp = beta_true_fp[z_prior_mask]
+lambda_true_fp = lambda_true_fp[z_prior_mask]
+vel_err_fp = vel_err_fp[z_prior_mask]
+thetaE_obs_clean_fp = thetaE_obs_clean_fp[z_prior_mask]
+vel_obs_clean_fp = vel_obs_clean_fp[z_prior_mask]
+thetaE_obs_noisy_fp = thetaE_obs_noisy_fp[z_prior_mask]
+vel_obs_noisy_fp = vel_obs_noisy_fp[z_prior_mask]
 
 zl_obs_clean_fp = zl_fp.copy()
 zs_obs_clean_fp = zs_fp.copy()
-zl_obs_noisy_fp = zl_fp + rng_np.normal(0.0, zL_sigma_fp)
-zs_obs_noisy_fp = zs_fp + rng_np.normal(0.0, zS_sigma_fp)
-bad_z_mask = (
-    (zl_obs_noisy_fp <= 0.0)
-    | (zs_obs_noisy_fp <= 0.0)
-    | (zs_obs_noisy_fp <= zl_obs_noisy_fp + Z_SEP_MIN)
-)
+zl_obs_noisy_fp = tool.truncated_normal(zl_fp, zL_sigma_fp, zL_low_fp, zL_high_fp, random_state=rng_np)
+zs_obs_noisy_fp = tool.truncated_normal(zs_fp, zS_sigma_fp, zS_low_fp, zS_high_fp, random_state=rng_np)
+bad_z_mask = zs_obs_noisy_fp <= zl_obs_noisy_fp
 for _ in range(20):
     if not np.any(bad_z_mask):
         break
-    zl_obs_noisy_fp[bad_z_mask] = zl_fp[bad_z_mask] + rng_np.normal(0.0, zL_sigma_fp[bad_z_mask])
-    zs_obs_noisy_fp[bad_z_mask] = zs_fp[bad_z_mask] + rng_np.normal(0.0, zS_sigma_fp[bad_z_mask])
-    bad_z_mask = (
-        (zl_obs_noisy_fp <= 0.0)
-        | (zs_obs_noisy_fp <= 0.0)
-        | (zs_obs_noisy_fp <= zl_obs_noisy_fp + Z_SEP_MIN)
+    zl_obs_noisy_fp[bad_z_mask] = tool.truncated_normal(
+        zl_fp[bad_z_mask],
+        zL_sigma_fp[bad_z_mask],
+        zL_low_fp[bad_z_mask],
+        zL_high_fp[bad_z_mask],
+        random_state=rng_np,
     )
-zl_obs_noisy_fp = np.maximum(zl_obs_noisy_fp, 1e-4)
-zs_obs_noisy_fp = np.maximum(zs_obs_noisy_fp, zl_obs_noisy_fp + Z_SEP_MIN + 1e-4)
+    zs_obs_noisy_fp[bad_z_mask] = tool.truncated_normal(
+        zs_fp[bad_z_mask],
+        zS_sigma_fp[bad_z_mask],
+        zS_low_fp[bad_z_mask],
+        zS_high_fp[bad_z_mask],
+        random_state=rng_np,
+    )
+    bad_z_mask = zs_obs_noisy_fp <= zl_obs_noisy_fp
+if np.any(bad_z_mask):
+    raise RuntimeError("Found invalid noisy redshift draws with zS<=zL after truncated resampling.")
 step(
     "Noisy z constraints applied: "
     f"zl_min={zl_obs_noisy_fp.min():.4f}, zs_min={zs_obs_noisy_fp.min():.4f}, "
-    f"min(zs-zl)={(zs_obs_noisy_fp - zl_obs_noisy_fp).min():.4e}"
+    f"min(zs-zl)={(zs_obs_noisy_fp - zl_obs_noisy_fp).min():.4e}, "
+    f"min(zS_low-zL_high)={(zS_low_fp - zL_high_fp).min():.4e}"
 )
 
 gamma_err_fp = np.full(zl_fp.size, 0.2)
@@ -241,6 +258,10 @@ def build_data(zl_obs, zs_obs, theta_E_obs, vel_obs, gamma_obs):
         "zs_true": zs_fp,
         "zL_err": zL_sigma_fp,
         "zS_err": zS_sigma_fp,
+        "zL_low": zL_low_fp,
+        "zL_high": zL_high_fp,
+        "zS_low": zS_low_fp,
+        "zS_high": zS_high_fp,
         "theta_E": theta_E_obs,
         "theta_E_true": thetaE_true_fp,
         "theta_E_err": thetaE_err_fp,
@@ -293,11 +314,11 @@ def fundamental_plane_model(fp_data):
     with numpyro.plate("fp_redshift", n_lens):
         zL_fp = numpyro.sample(
             "zL_fp_latent",
-            dist.TruncatedNormal(fp_data["zl"], fp_data["zL_err"], low=1e-4),
+            dist.TruncatedNormal(fp_data["zl"], fp_data["zL_err"], low=fp_data["zL_low"], high=fp_data["zL_high"]),
         )
         zS_fp = numpyro.sample(
             "zS_fp_latent",
-            dist.TruncatedNormal(fp_data["zs"], fp_data["zS_err"], low=zL_fp + Z_SEP_MIN),
+            dist.TruncatedNormal(fp_data["zs"], fp_data["zS_err"], low=fp_data["zS_low"], high=fp_data["zS_high"]),
         )
     _dl, ds_fp, dls_fp = tool.dldsdls(zL_fp, zS_fp, cosmo, n=20)
 
@@ -325,13 +346,17 @@ def build_init_values(fp_data):
     # Keep initial values strictly inside constrained supports to avoid boundary-induced invalid transforms.
     zl_true = np.asarray(fp_data.get("zl_true", fp_data["zl"]), dtype=np.float64)
     zs_true = np.asarray(fp_data.get("zs_true", fp_data["zs"]), dtype=np.float64)
+    zL_low = np.asarray(fp_data.get("zL_low", fp_data["zl"] - Z_SIGMA_CLIP * fp_data["zL_err"]), dtype=np.float64)
+    zL_high = np.asarray(fp_data.get("zL_high", fp_data["zl"] + Z_SIGMA_CLIP * fp_data["zL_err"]), dtype=np.float64)
+    zS_low = np.asarray(fp_data.get("zS_low", fp_data["zs"] - Z_SIGMA_CLIP * fp_data["zS_err"]), dtype=np.float64)
+    zS_high = np.asarray(fp_data.get("zS_high", fp_data["zs"] + Z_SIGMA_CLIP * fp_data["zS_err"]), dtype=np.float64)
     theta_true = np.asarray(fp_data.get("theta_E_true", fp_data["theta_E"]), dtype=np.float64)
     gamma_true = np.asarray(fp_data.get("gamma_true", fp_data["gamma_obs"]), dtype=np.float64)
     beta_true = np.asarray(fp_data.get("beta_true", np.zeros_like(theta_true)), dtype=np.float64)
     lambda_true = np.asarray(fp_data.get("lambda_true", np.ones_like(theta_true)), dtype=np.float64)
 
-    zl_true = np.maximum(zl_true, 1e-3)
-    zs_true = np.maximum(zs_true, zl_true + Z_SEP_MIN + 1e-3)
+    zl_true = np.clip(zl_true, zL_low + 1e-6, zL_high - 1e-6)
+    zs_true = np.clip(zs_true, zS_low + 1e-6, zS_high - 1e-6)
     theta_true = np.maximum(theta_true, 1e-3)
     gamma_true = np.clip(gamma_true, 1.401, 2.599)
     beta_true = np.clip(beta_true, -0.399, 0.399)
