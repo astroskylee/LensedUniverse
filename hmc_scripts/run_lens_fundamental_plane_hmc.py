@@ -60,6 +60,7 @@ cosmo_prior = {
     "omegam_up": 0.5, "omegam_low": 0.1,
 }
 Z_SEP_MIN = 0.2
+VEL_FRAC_ERR_MAX = 0.30
 
 step("Load lookup table and fundamental-plane catalog")
 LUT = np.load(DATA_DIR / "velocity_disp_table.npy")
@@ -108,6 +109,21 @@ re_fp = re_fp[theta_keep_mask]
 veldisp_true_catalog = veldisp_true_catalog[theta_keep_mask]
 vel_frac_err_template = vel_frac_err_template[theta_keep_mask]
 thetaE_err_fp = 0.01 * thetaE_true_fp
+
+vel_err_keep_mask = vel_frac_err_template < VEL_FRAC_ERR_MAX
+step(
+    f"Keep {int(vel_err_keep_mask.sum())}/{vel_err_keep_mask.size} FP systems after "
+    f"frac vel err<{VEL_FRAC_ERR_MAX:.2f} cut"
+)
+zl_fp = zl_fp[vel_err_keep_mask]
+zs_fp = zs_fp[vel_err_keep_mask]
+zL_sigma_fp = zL_sigma_fp[vel_err_keep_mask]
+zS_sigma_fp = zS_sigma_fp[vel_err_keep_mask]
+thetaE_true_fp = thetaE_true_fp[vel_err_keep_mask]
+thetaE_err_fp = thetaE_err_fp[vel_err_keep_mask]
+re_fp = re_fp[vel_err_keep_mask]
+veldisp_true_catalog = veldisp_true_catalog[vel_err_keep_mask]
+vel_frac_err_template = vel_frac_err_template[vel_err_keep_mask]
 
 _dl_fp_true, ds_fp_true, dls_fp_true = tool.dldsdls(zl_fp, zs_fp, cosmo_true, n=20)
 step("Build clean/noisy mock fundamental-plane observables")
