@@ -228,14 +228,9 @@ step(
 )
 
 gamma_err_fp = np.full(zl_fp.size, 0.2)
-n_gamma_obs = min(10000, zl_fp.size)
-gamma_has_obs = np.zeros(zl_fp.size, dtype=bool)
-gamma_obs_idx = rng_np.choice(zl_fp.size, size=n_gamma_obs, replace=False)
-gamma_has_obs[gamma_obs_idx] = True
-gamma_obs_clean_fp = np.zeros(zl_fp.size)
-gamma_obs_clean_fp[gamma_has_obs] = gamma_true_fp[gamma_has_obs]
-gamma_obs_noisy_fp = np.zeros(zl_fp.size)
-gamma_obs_noisy_fp[gamma_has_obs] = gamma_true_fp[gamma_has_obs] + rng_np.normal(0.0, gamma_err_fp[gamma_has_obs])
+gamma_has_obs = np.ones(zl_fp.size, dtype=bool)
+gamma_obs_clean_fp = gamma_true_fp.copy()
+gamma_obs_noisy_fp = gamma_true_fp + rng_np.normal(0.0, gamma_err_fp)
 
 
 def build_data(zl_obs, zs_obs, theta_E_obs, vel_obs, gamma_obs):
@@ -314,12 +309,10 @@ def fundamental_plane_model(fp_data):
 
         v_interp_fp = jampy_interp(thetaE_fp, gamma_fp, fp_data["re"], beta_fp)
         vel_pred_fp = v_interp_fp * jnp.sqrt(ds_fp / dls_fp) * jnp.sqrt(lambda_fp)
-        gamma_obs_mask = jnp.asarray(fp_data["gamma_has_obs"])
-        gamma_obs_used = jnp.where(gamma_obs_mask, fp_data["gamma_obs"], gamma_fp)
         numpyro.sample(
             "gamma_fp_like",
-            dist.Normal(gamma_fp, fp_data["gamma_err"]).mask(gamma_obs_mask),
-            obs=gamma_obs_used,
+            dist.Normal(gamma_fp, fp_data["gamma_err"]),
+            obs=fp_data["gamma_obs"],
         )
         numpyro.sample(
             "vel_fp_like",
