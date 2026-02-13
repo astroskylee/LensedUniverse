@@ -41,6 +41,8 @@ rng_np = np.random.default_rng(SEED)
 np.random.seed(SEED)
 
 TEST_MODE = False
+RUN_NOISY_INFERENCE = False
+INCLUDE_FP_PROBE = False
 RESULT_DIR = Path("/mnt/lustre/tianli/LensedUniverse_result")
 RESULT_DIR.mkdir(parents=True, exist_ok=True)
 FIG_DIR = Path("result")
@@ -61,6 +63,8 @@ cosmo_prior = {
     "h0_up": 80.0,  "h0_low": 60.0,
     "omegam_up": 0.5, "omegam_low": 0.1,
 }
+DSPL_TARGET = 500
+PHOTO_FRAC_ZS2 = 0.60
 
 # ---------------------------
 # DSPL data (clean + noisy)
@@ -76,16 +80,31 @@ zs2_true_cat = data_dspl[:, 2]
 beta_err_dspl = data_dspl[:, 6]
 model_vel_dspl = data_dspl[:, 11]
 
-m_ok = (zs2_true_cat > zs1_dspl)
-zl_dspl  = zl_dspl[m_ok]
-zs1_dspl = zs1_dspl[m_ok]
-zs2_true_cat = zs2_true_cat[m_ok]
-beta_err_dspl = beta_err_dspl[m_ok]
-model_vel_dspl = model_vel_dspl[m_ok]
+step(
+    f"Catalog zs2<=zs1 count: {int(np.sum(zs2_true_cat <= zs1_dspl))}/"
+    f"{len(zs2_true_cat)} (no pre-filter)"
+)
 
+N_all = len(zl_dspl)
+if N_all > DSPL_TARGET:
+    select_idx = np.sort(rng_np.choice(N_all, size=DSPL_TARGET, replace=False))
+    zl_dspl = zl_dspl[select_idx]
+    zs1_dspl = zs1_dspl[select_idx]
+    zs2_true_cat = zs2_true_cat[select_idx]
+    beta_err_dspl = beta_err_dspl[select_idx]
+    model_vel_dspl = model_vel_dspl[select_idx]
 N_dspl = len(zl_dspl)
 
-is_photo = (rng_np.random(N_dspl) < 0.60)
+n_photo = int(round(PHOTO_FRAC_ZS2 * N_dspl))
+n_photo = max(0, min(n_photo, N_dspl))
+is_photo = np.zeros(N_dspl, dtype=bool)
+if n_photo > 0:
+    photo_idx = rng_np.choice(N_dspl, size=n_photo, replace=False)
+    is_photo[photo_idx] = True
+step(
+    f"Use {N_dspl} DSPL systems; source2 photo-z count={int(is_photo.sum())} "
+    f"({float(is_photo.mean()):.2%})"
+)
 zs2_err = np.where(is_photo, 0.1, 1e-4)
 zs2_obs = zs2_true_cat + rng_np.normal(0.0, zs2_err)
 
@@ -103,7 +122,7 @@ Dl2, Ds2, Dls2 = tool.compute_distances(zl_dspl, zs2_true_cat, cosmo_true)
 beta_geom_dspl = Dls1 * Ds2 / (Ds1 * Dls2)
 
 lambda_true_dspl = tool.truncated_normal(1.0, 0.05, 0.85, 1.15, N_dspl, random_state=rng_np)
-lambda_err_dspl = lambda_true_dspl * 0.06
+lambda_err_dspl = lambda_true_dspl * 0.10
 
 true_vel_dspl = model_vel_dspl * jnp.sqrt(lambda_true_dspl)
 vel_err_dspl = 0.03 * true_vel_dspl
@@ -374,7 +393,7 @@ fp_noisy = build_fp(zl_obs_noisy_fp, zs_obs_noisy_fp, thetaE_obs_noisy_fp, vel_o
 step("Build SNe clean/noisy datasets")
 sn_data = pd.read_csv(DATA_DIR / "Euclid_150SNe.csv")
 sn_data = sn_data[(sn_data["tmax"] >= 5) & (sn_data["tmax"] <= 80)]
-sn_data = sn_data.nlargest(70, "tmax")
+sn_data = sn_data.nlargest(100, "tmax")
 zl_sne = np.array(sn_data["zl"])
 zs_sne = np.array(sn_data["z_host"])
 t_delay_true_days = np.array(sn_data["tmax"])
@@ -598,11 +617,11 @@ if TEST_MODE:
     num_chains = 2
     chain_method = "sequential"
 else:
-    N_DSPL_USE = 1200
-    N_LENS_USE = 5000
+    N_DSPL_USE = None
+    N_LENS_USE = None
     N_FP_USE = None
-    N_SNE_USE = 50
-    N_QUASAR_USE = 500
+    N_SNE_USE = None
+    N_QUASAR_USE = None
     num_warmup = 500
     num_samples = 1500
     num_chains = 4
@@ -855,7 +874,7 @@ def run_mcmc(data, key, tag):
     step(f"Run joint MCMC ({tag})")
     nuts = NUTS(
         joint_model,
-        target_accept_prob=0.95,
+        target_accept_prob=0.99,
         init_strategy=init_to_value(values=build_init_values(data)),
     )
     mcmc = MCMC(
@@ -890,20 +909,32 @@ def run_mcmc(data, key, tag):
     return inf_data
 
 
-clean_data = {"dspl": dspl_clean, "lens": Lens_clean, "fp": fp_clean, "sne": sne_clean, "quasar": quasar_clean}
-noisy_data = {"dspl": dspl_noisy, "lens": Lens_noisy, "fp": fp_noisy, "sne": sne_noisy, "quasar": quasar_noisy}
+fp_clean_joint = fp_clean if INCLUDE_FP_PROBE else None
+fp_noisy_joint = fp_noisy if INCLUDE_FP_PROBE else None
+if INCLUDE_FP_PROBE:
+    step("Include FP probe in joint inference")
+else:
+    step("Disable FP probe in joint inference (INCLUDE_FP_PROBE=False)")
+
+clean_data = {"dspl": dspl_clean, "lens": Lens_clean, "fp": fp_clean_joint, "sne": sne_clean, "quasar": quasar_clean}
+noisy_data = {"dspl": dspl_noisy, "lens": Lens_noisy, "fp": fp_noisy_joint, "sne": sne_noisy, "quasar": quasar_noisy}
 
 key = random.PRNGKey(42)
 key_clean, key_noisy = random.split(key)
 
-step("Execute clean and noisy joint runs")
+step("Execute clean joint run")
 idata_clean = run_mcmc(clean_data, key_clean, "clean")
-idata_noisy = run_mcmc(noisy_data, key_noisy, "noisy")
 
-step("Create overlay corner plot")
-corner_vars = select_corner_vars(
-    idata_clean,
-    idata_noisy,
-    ["h0", "Omegam", "w0", "wa", "lambda_mean", "lambda_sigma", "gamma_mean", "gamma_sigma", "beta_mean", "beta_sigma"],
-)
-make_overlay_corner(idata_clean, idata_noisy, corner_vars, FIG_DIR / "joint_corner_overlay.pdf")
+if RUN_NOISY_INFERENCE:
+    step("Execute noisy joint run")
+    idata_noisy = run_mcmc(noisy_data, key_noisy, "noisy")
+
+    step("Create overlay corner plot")
+    corner_vars = select_corner_vars(
+        idata_clean,
+        idata_noisy,
+        ["h0", "Omegam", "w0", "wa", "lambda_mean", "lambda_sigma", "gamma_mean", "gamma_sigma", "beta_mean", "beta_sigma"],
+    )
+    make_overlay_corner(idata_clean, idata_noisy, corner_vars, FIG_DIR / "joint_corner_overlay.pdf")
+else:
+    step("Skip noisy joint inference (RUN_NOISY_INFERENCE=False)")
