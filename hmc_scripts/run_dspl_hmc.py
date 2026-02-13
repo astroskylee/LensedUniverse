@@ -56,6 +56,8 @@ cosmo_prior = {
     "h0_up": 80.0,  "h0_low": 60.0,
     "omegam_up": 0.5, "omegam_low": 0.1,
 }
+DSPL_TARGET = 500
+PHOTO_FRAC_ZS2 = 0.60
 
 step("Load DSPL catalog and derive geometric quantities")
 data_dspl = np.loadtxt(DATA_DIR / "EuclidDSPLs_1.txt")
@@ -68,16 +70,31 @@ zs2_true_cat = data_dspl[:, 2]
 beta_err_dspl = data_dspl[:, 6]
 model_vel_dspl = data_dspl[:, 11]
 
-m_ok = (zs2_true_cat > zs1_dspl)
-zl_dspl  = zl_dspl[m_ok]
-zs1_dspl = zs1_dspl[m_ok]
-zs2_true_cat = zs2_true_cat[m_ok]
-beta_err_dspl = beta_err_dspl[m_ok]
-model_vel_dspl = model_vel_dspl[m_ok]
+step(
+    f"Catalog zs2<=zs1 count: {int(np.sum(zs2_true_cat <= zs1_dspl))}/"
+    f"{len(zs2_true_cat)} (no pre-filter)"
+)
 
+N_all = len(zl_dspl)
+if N_all > DSPL_TARGET:
+    select_idx = np.sort(rng_np.choice(N_all, size=DSPL_TARGET, replace=False))
+    zl_dspl = zl_dspl[select_idx]
+    zs1_dspl = zs1_dspl[select_idx]
+    zs2_true_cat = zs2_true_cat[select_idx]
+    beta_err_dspl = beta_err_dspl[select_idx]
+    model_vel_dspl = model_vel_dspl[select_idx]
 N_dspl = len(zl_dspl)
 
-is_photo = (rng_np.random(N_dspl) < 0.60)
+n_photo = int(round(PHOTO_FRAC_ZS2 * N_dspl))
+n_photo = max(0, min(n_photo, N_dspl))
+is_photo = np.zeros(N_dspl, dtype=bool)
+if n_photo > 0:
+    photo_idx = rng_np.choice(N_dspl, size=n_photo, replace=False)
+    is_photo[photo_idx] = True
+step(
+    f"Use {N_dspl} DSPL systems; source2 photo-z count={int(is_photo.sum())} "
+    f"({float(is_photo.mean()):.2%})"
+)
 zs2_err = np.where(is_photo, 0.1, 1e-4)
 zs2_obs = zs2_true_cat + rng_np.normal(0.0, zs2_err)
 
@@ -96,7 +113,7 @@ beta_geom_dspl = Dls1 * Ds2 / (Ds1 * Dls2)
 
 step("Build clean/noisy mock DSPL observables")
 lambda_true = tool.truncated_normal(1.0, 0.05, 0.85, 1.15, N_dspl, random_state=rng_np)
-lambda_err = lambda_true * 0.06
+lambda_err = lambda_true * 0.10
 
 true_vel = model_vel_dspl * jnp.sqrt(lambda_true)
 vel_err = 0.03 * true_vel
