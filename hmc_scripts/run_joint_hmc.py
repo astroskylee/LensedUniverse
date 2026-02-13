@@ -496,7 +496,7 @@ def joint_model(dspl_data=None, lens_data=None, sne_data=None, quasar_data=None)
 
         N = len(zl)
         with numpyro.plate("dspl", N):
-            lambda_dspl = numpyro.sample("lambda_dspl", dist.TruncatedNormal(lambda_mean, lambda_sigma, low=0.8, high=1.2))
+            lambda_dspl = numpyro.sample("lambda_dspl", dist.TruncatedNormal(lambda_mean, lambda_sigma, low=0.5, high=1.5))
             numpyro.sample("lambda_dspl_like", dist.Normal(lambda_dspl, dspl_data["lambda_err"]), obs=dspl_data["lambda_obs"])
             beta_mst = tool.beta_antimst(beta_geom, lambda_dspl)
             numpyro.sample("beta_dspl_like", dist.TruncatedNormal(beta_mst, dspl_data["beta_err"], low=0.0, high=1.0), obs=dspl_data["beta_obs"])

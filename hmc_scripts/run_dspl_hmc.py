@@ -124,7 +124,7 @@ lambda_obs_clean = lambda_true
 beta_obs_clean = beta_true
 zs2_use_clean = zs2_true_cat
 
-lambda_obs_noisy = lambda_true + np.random.normal(0.0, lambda_err)
+lambda_obs_noisy = lambda_true + rng_np.normal(0.0, lambda_err)
 beta_obs_noisy = tool.truncated_normal(beta_true, beta_err_dspl, 0.0, 1.0, random_state=rng_np)
 zs2_use_noisy = zs2_obs
 
@@ -194,7 +194,7 @@ def dspl_model(dspl_data):
 
     N = len(zl)
     with numpyro.plate("dspl", N):
-        lambda_dspl = numpyro.sample("lambda_dspl", dist.TruncatedNormal(lambda_mean, lambda_sigma, low=0.8, high=1.2))
+        lambda_dspl = numpyro.sample("lambda_dspl", dist.TruncatedNormal(lambda_mean, lambda_sigma, low=0.5, high=1.5))
         numpyro.sample("lambda_dspl_like", dist.Normal(lambda_dspl, dspl_data["lambda_err"]), obs=dspl_data["lambda_obs"])
         beta_mst = tool.beta_antimst(beta_geom, lambda_dspl)
         numpyro.sample("beta_dspl_like", dist.TruncatedNormal(beta_mst, dspl_data["beta_err"], low=0.0, high=1.0), obs=dspl_data["beta_obs"])
@@ -228,7 +228,7 @@ def run_mcmc(data, key, tag):
 
     nuts = NUTS(
         dspl_model,
-        target_accept_prob=0.95,
+        target_accept_prob=0.99,
         init_strategy=init_to_value(values=build_init_values(data)),
     )
     mcmc = MCMC(
