@@ -1,0 +1,22 @@
+Loading system/intel64
+  Loading requirement: services/slurm
+Currently Loaded Modulefiles: 1) git/2.48.0 3) system/intel64(default) 2) services/slurm <aL> 4) anaconda3/2024.02 Key: (symbolic-version) <module-tag> <aL>=auto-loaded
+[STEP] Run joint HMC
+[INFO] Precision mode: FP32
+[STEP] Build DSPL clean/noisy datasets
+[STEP] Catalog zs2<=zs1 count: 0/1434 (no pre-filter)
+[STEP] Use 500 DSPL systems; source2 photo-z count=300 (60.00%)
+[STEP] Build lens+kinematic clean/noisy datasets
+[STEP] Build SNe clean/noisy datasets
+[STEP] Build quasar clean/noisy datasets
+[STEP] Apply per-probe sample limits for this run mode
+[STEP] Execute clean joint run
+[STEP] Run joint MCMC (clean)
+[clean] divergences: 0
+[STEP] Skip noisy joint inference (RUN_NOISY_INFERENCE=False)
+[STEP] Run lens+kinematic HMC
+[INFO] Precision mode: FP32
+[STEP] Load lensing lookup table and Euclid lens catalog
+[STEP] Build clean/noisy mock lens+kinematic observables
+[STEP] Execute clean and noisy runs
+[STEP] Run MCMC for lens+kin (clean)

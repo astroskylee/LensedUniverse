@@ -4,7 +4,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --job-name=jaxlcosmo
 #SBATCH --ntasks-per-node=20
-#SBATCH --time=60:00:00
+#SBATCH --time=24:00:00
 #SBATCH --output=log/output_log%j
 #SBATCH --error=log/error_log%j
 #SBATCH --mail-user=tian.li@port.ac.uk

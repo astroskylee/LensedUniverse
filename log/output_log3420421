@@ -1,0 +1,31 @@
+Loading system/intel64
+  Loading requirement: services/slurm
+Currently Loaded Modulefiles: 1) git/2.48.0 3) system/intel64(default) 2) services/slurm <aL> 4) anaconda3/2024.02 Key: (symbolic-version) <module-tag> <aL>=auto-loaded
+[STEP] Run lens fundamental-plane HMC
+[INFO] Precision mode: FP32
+[STEP] Load lookup table and fundamental-plane catalog
+[STEP] Loaded 100000 FP systems before observation cuts
+[STEP] Re_true from linear veldisp mapping: vmin=139.396, vmax=465.386, re_min=0.5000, re_median=1.5155, re_max=2.8000
+[STEP] Keep 97554/100000 FP systems after thetaE_true<=2.5 cut
+[STEP] Keep 61421/97554 FP systems after frac vel err<0.30 cut
+[STEP] Build clean/noisy mock fundamental-plane observables
+[STEP] Keep 61337/61421 FP systems after clean vel<=400 cut
+[STEP] vel_obs_clean_fp before noisy cuts: min=128.760, q01=165.282, q05=183.711, median=244.369, q95=327.812, q99=364.563, max=399.586
+[STEP] Keep 59371/61337 FP systems after noisy vel<=400 cut
+[STEP] Keep 59331/59371 FP systems after z-bound cut (z_low>0 and zs-zl>2sigma_zs+2sigma_zl)
+[STEP] Noisy z constraints applied: zl_min=0.0405, zs_min=0.1646, min(zs-zl)=4.7243e-02, min(zS_low-zL_high)=5.0672e-04
+[STEP] Sampled 20000/59331 FP systems after all filters
+[STEP] Execute clean and noisy runs
+[STEP] Run MCMC for lens fundamental-plane (clean)
+[clean] run uses init_to_value
+[clean] divergences: 0
+[STEP] Run MCMC for lens fundamental-plane (noisy)
+[noisy] run uses init_to_value
+[noisy] divergences: 0
+[STEP] Create overlay corner plot
+[STEP] Run lens+kinematic HMC
+[INFO] Precision mode: FP32
+[STEP] Load lensing lookup table and Euclid lens catalog
+[STEP] Build clean/noisy mock lens+kinematic observables
+[STEP] Execute clean and noisy runs
+[STEP] Run MCMC for lens+kin (clean)
