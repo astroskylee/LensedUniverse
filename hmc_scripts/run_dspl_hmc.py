@@ -22,7 +22,7 @@ import arviz as az
 from slcosmo import tool
 from hmc_scripts.corner_utils import select_corner_vars, make_overlay_corner
 
-USE_X64 = os.environ.get("SLCOSMO_USE_X64", "0").strip().lower() in {"1", "true", "yes", "y", "on"}
+USE_X64 = os.environ.get("SLCOSMO_USE_X64", "1").strip().lower() in {"1", "true", "yes", "y", "on"}
 jax.config.update("jax_enable_x64", USE_X64)
 if USE_X64:
     numpyro.enable_x64()
@@ -37,6 +37,7 @@ rng_np = np.random.default_rng(SEED)
 np.random.seed(SEED)
 
 TEST_MODE = False
+RUN_NOISY_INFERENCE = os.environ.get("SLCOSMO_RUN_NOISY", "0").strip().lower() in {"1", "true", "yes", "y", "on"}
 RESULT_DIR = Path("/mnt/lustre/tianli/LensedUniverse_result")
 RESULT_DIR.mkdir(parents=True, exist_ok=True)
 FIG_DIR = Path("result")
@@ -306,16 +307,24 @@ def run_mcmc(data, key, tag):
 
 
 key = random.PRNGKey(42)
-key_clean, key_noisy = random.split(key)
+if RUN_NOISY_INFERENCE:
+    key_clean, key_noisy = random.split(key)
+else:
+    key_clean = key
 
-step("Execute clean and noisy runs")
+step("Execute clean run")
 idata_clean = run_mcmc(dspl_data_clean, key_clean, "clean")
-idata_noisy = run_mcmc(dspl_data_noisy, key_noisy, "noisy")
 
-step("Create overlay corner plot")
-corner_vars = select_corner_vars(
-    idata_clean,
-    idata_noisy,
-    ["h0", "Omegam", "w0", "wa", "lambda_mean", "lambda_sigma"],
-)
-make_overlay_corner(idata_clean, idata_noisy, corner_vars, FIG_DIR / "dspl_corner_overlay.pdf")
+if RUN_NOISY_INFERENCE:
+    step("Execute noisy run")
+    idata_noisy = run_mcmc(dspl_data_noisy, key_noisy, "noisy")
+
+    step("Create overlay corner plot")
+    corner_vars = select_corner_vars(
+        idata_clean,
+        idata_noisy,
+        ["h0", "Omegam", "w0", "wa", "lambda_mean", "lambda_sigma"],
+    )
+    make_overlay_corner(idata_clean, idata_noisy, corner_vars, FIG_DIR / "dspl_corner_overlay.pdf")
+else:
+    step("Skip noisy inference (RUN_NOISY_INFERENCE=False)")

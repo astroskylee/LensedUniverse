@@ -19,6 +19,9 @@ echo `module list`
 source /mnt/lustre2/shared_conda/envs/tianli/herculens_tian/bin/activate
 cd /users/tianli/LensedUniverse
 
+export SLCOSMO_USE_X64=1
+export SLCOSMO_RUN_NOISY=0
+
 echo "[STEP] Run joint HMC"
 python -u hmc_scripts/run_joint_hmc.py
 
@@ -33,4 +36,3 @@ python -u hmc_scripts/run_sne_hmc.py
 
 echo "[STEP] Run lensed quasar HMC"
 python -u hmc_scripts/run_quasar_hmc.py
-

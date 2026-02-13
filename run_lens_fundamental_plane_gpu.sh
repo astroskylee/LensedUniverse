@@ -20,4 +20,7 @@ echo `module list`
 source /mnt/lustre2/shared_conda/envs/tianli/herculens_tian/bin/activate
 cd /users/tianli/LensedUniverse
 
+export SLCOSMO_USE_X64=1
+export SLCOSMO_RUN_NOISY=0
+
 python -u hmc_scripts/run_lens_fundamental_plane_hmc.py

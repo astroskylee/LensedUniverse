@@ -24,7 +24,7 @@ import arviz as az
 from slcosmo import tool
 from hmc_scripts.corner_utils import select_corner_vars, make_overlay_corner
 
-USE_X64 = os.environ.get("SLCOSMO_USE_X64", "0").strip().lower() in {"1", "true", "yes", "y", "on"}
+USE_X64 = os.environ.get("SLCOSMO_USE_X64", "1").strip().lower() in {"1", "true", "yes", "y", "on"}
 jax.config.update("jax_enable_x64", USE_X64)
 if USE_X64:
     numpyro.enable_x64()
@@ -38,7 +38,7 @@ SEED = 42
 rng_np = np.random.default_rng(SEED)
 np.random.seed(SEED)
 
-RUN_NOISY_INFERENCE = False
+RUN_NOISY_INFERENCE = os.environ.get("SLCOSMO_RUN_NOISY", "0").strip().lower() in {"1", "true", "yes", "y", "on"}
 RESULT_DIR = Path(os.environ.get("SLCOSMO_RESULT_DIR", "/mnt/lustre/tianli/LensedUniverse_result"))
 RESULT_DIR.mkdir(parents=True, exist_ok=True)
 FIG_DIR = Path(os.environ.get("SLCOSMO_FIG_DIR", "result"))

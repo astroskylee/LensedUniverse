@@ -4,6 +4,8 @@ import subprocess
 from pathlib import Path
 
 os.environ.setdefault("HDF5_USE_FILE_LOCKING", "FALSE")
+os.environ.setdefault("SLCOSMO_USE_X64", "1")
+os.environ.setdefault("SLCOSMO_RUN_NOISY", "0")
 
 repo_root = Path(__file__).resolve().parent.parent
 os.chdir(repo_root)
