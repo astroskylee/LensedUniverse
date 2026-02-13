@@ -671,11 +671,34 @@ def run_mcmc(data, key, tag):
     az.to_netcdf(inf_data, RESULT_DIR / f"joint_{tag}.nc")
     trace_vars = ["h0", "Omegam", "w0", "wa", "lambda_mean", "lambda_sigma", "gamma_mean", "gamma_sigma", "beta_mean", "beta_sigma"]
     trace_vars = [v for v in trace_vars if v in inf_data.posterior and inf_data.posterior[v].ndim == 2]
-    if trace_vars:
-        trace_axes = az.plot_trace(inf_data, var_names=trace_vars, compact=False)
+
+    valid_trace_vars = []
+    dropped_trace_vars = {}
+    for v in trace_vars:
+        vals = np.asarray(inf_data.posterior[v]).reshape(-1)
+        finite = np.isfinite(vals)
+        n_finite = int(finite.sum())
+        if n_finite < 5:
+            dropped_trace_vars[v] = f"finite samples too few ({n_finite})"
+            continue
+        std = float(np.nanstd(vals[finite]))
+        if (not np.isfinite(std)) or (std < 1e-12):
+            dropped_trace_vars[v] = f"near-constant/non-finite std ({std})"
+            continue
+        valid_trace_vars.append(v)
+
+    if dropped_trace_vars:
+        print(f"[{tag}] skip trace vars with unstable density input:")
+        for k, reason in dropped_trace_vars.items():
+            print(f"  - {k}: {reason}")
+
+    if valid_trace_vars:
+        trace_axes = az.plot_trace(inf_data, var_names=valid_trace_vars, compact=False)
         trace_fig = np.asarray(trace_axes).ravel()[0].figure
         trace_fig.savefig(FIG_DIR / f"joint_trace_{tag}.pdf", dpi=200, bbox_inches="tight")
         plt.close(trace_fig)
+    else:
+        print(f"[{tag}] no valid vars left for trace plot.")
     return inf_data
 
 
