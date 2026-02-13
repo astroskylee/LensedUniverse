@@ -19,9 +19,6 @@ echo `module list`
 source /mnt/lustre2/shared_conda/envs/tianli/herculens_tian/bin/activate
 cd /users/tianli/LensedUniverse
 
-echo "[STEP] Run lens fundamental-plane HMC"
-python -u hmc_scripts/run_lens_fundamental_plane_hmc.py
-
 echo "[STEP] Run lens+kinematic HMC"
 python -u hmc_scripts/run_lens_kin_hmc.py
 

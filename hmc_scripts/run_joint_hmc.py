@@ -20,8 +20,6 @@ import numpyro.distributions as dist
 from numpyro.infer import NUTS, MCMC, init_to_value
 from jax import random
 import arviz as az
-from astropy.cosmology import Planck18
-import astropy.units as u
 
 from slcosmo import tool
 from hmc_scripts.corner_utils import select_corner_vars, make_overlay_corner
@@ -42,7 +40,6 @@ np.random.seed(SEED)
 
 TEST_MODE = False
 RUN_NOISY_INFERENCE = False
-INCLUDE_FP_PROBE = False
 RESULT_DIR = Path("/mnt/lustre/tianli/LensedUniverse_result")
 RESULT_DIR.mkdir(parents=True, exist_ok=True)
 FIG_DIR = Path("result")
@@ -218,174 +215,6 @@ def build_lens(gamma_obs, theta_E_obs, vel_obs):
 
 lens_clean = build_lens(gamma_obs_clean, thetaE_obs_clean, vel_obs_clean)
 lens_noisy = build_lens(gamma_obs_noisy, thetaE_obs_noisy, vel_obs_noisy)
-
-# ---------------------------
-# Lens fundamental-plane data (clean + noisy)
-# ---------------------------
-step("Build fundamental-plane clean/noisy datasets")
-fp_df = pd.read_csv(DATA_DIR / "db_zBEAMS_PEMD_100000_s1_GDB_phot_err_ManySF_TL.csv")
-if TEST_MODE:
-    n_fp_pool = 200
-else:
-    n_fp_pool = 100000
-select_idx_fp = rng_np.choice(fp_df.shape[0], size=min(n_fp_pool, fp_df.shape[0]), replace=False)
-fp_df = fp_df.iloc[np.sort(select_idx_fp)].reset_index(drop=True)
-step(f"Sampled {fp_df.shape[0]} FP systems before observation cuts")
-
-zl_fp = fp_df["zL_true"].to_numpy()
-zs_fp = fp_df["zS_true"].to_numpy()
-zL_sigma_fp = np.abs(fp_df["sigma_zL_obs"].to_numpy())
-zS_sigma_fp = np.abs(fp_df["sigma_zS_obs"].to_numpy())
-thetaE_true_fp = fp_df["tE_true"].to_numpy()
-re_kpc_fp = fp_df["r_true"].to_numpy()
-da_kpc_fp = Planck18.angular_diameter_distance(zl_fp).to(u.kpc).value
-re_fp = (re_kpc_fp / da_kpc_fp) * 206265.0
-veldisp_true_catalog = fp_df["veldisp_true"].to_numpy()
-vel_frac_err_template = fp_df["sigma_veldisp_obs"].to_numpy() / veldisp_true_catalog
-
-step(
-    "FP Re_arcsec before cuts: "
-    f"min={re_fp.min():.4f}, median={np.median(re_fp):.4f}, max={re_fp.max():.4f}"
-)
-re_keep_mask = re_fp <= 2.8
-step(f"Keep {int(re_keep_mask.sum())}/{re_keep_mask.size} FP systems after Re_arcsec<=2.8 cut")
-zl_fp = zl_fp[re_keep_mask]
-zs_fp = zs_fp[re_keep_mask]
-zL_sigma_fp = zL_sigma_fp[re_keep_mask]
-zS_sigma_fp = zS_sigma_fp[re_keep_mask]
-thetaE_true_fp = thetaE_true_fp[re_keep_mask]
-re_fp = re_fp[re_keep_mask]
-veldisp_true_catalog = veldisp_true_catalog[re_keep_mask]
-vel_frac_err_template = vel_frac_err_template[re_keep_mask]
-
-theta_keep_mask = thetaE_true_fp <= 2.5
-step(f"Keep {int(theta_keep_mask.sum())}/{theta_keep_mask.size} FP systems after thetaE_true<=2.5 cut")
-zl_fp = zl_fp[theta_keep_mask]
-zs_fp = zs_fp[theta_keep_mask]
-zL_sigma_fp = zL_sigma_fp[theta_keep_mask]
-zS_sigma_fp = zS_sigma_fp[theta_keep_mask]
-thetaE_true_fp = thetaE_true_fp[theta_keep_mask]
-re_fp = re_fp[theta_keep_mask]
-veldisp_true_catalog = veldisp_true_catalog[theta_keep_mask]
-vel_frac_err_template = vel_frac_err_template[theta_keep_mask]
-thetaE_err_fp = 0.01 * thetaE_true_fp
-
-_dl_fp_true, ds_fp_true, dls_fp_true = tool.dldsdls(zl_fp, zs_fp, cosmo_true, n=20)
-gamma_true_fp = tool.truncated_normal(2.0, 0.2, 1.5, 2.5, zl_fp.size, random_state=rng_np)
-beta_true_fp = tool.truncated_normal(0.0, 0.2, -0.4, 0.4, zl_fp.size, random_state=rng_np)
-lambda_true_fp = tool.truncated_normal(1.0, 0.05, 0.8, 1.2, zl_fp.size, random_state=rng_np)
-vel_model_fp = jampy_interp(thetaE_true_fp, gamma_true_fp, re_fp, beta_true_fp) * jnp.sqrt(ds_fp_true / dls_fp_true)
-vel_true_fp = np.asarray(vel_model_fp) * np.sqrt(lambda_true_fp)
-vel_err_fp = vel_frac_err_template * np.abs(vel_true_fp)
-
-clean_keep_mask = vel_true_fp <= 400.0
-step(f"Keep {int(clean_keep_mask.sum())}/{clean_keep_mask.size} FP systems after clean vel<=400 cut")
-zl_fp = zl_fp[clean_keep_mask]
-zs_fp = zs_fp[clean_keep_mask]
-zL_sigma_fp = zL_sigma_fp[clean_keep_mask]
-zS_sigma_fp = zS_sigma_fp[clean_keep_mask]
-thetaE_true_fp = thetaE_true_fp[clean_keep_mask]
-thetaE_err_fp = thetaE_err_fp[clean_keep_mask]
-re_fp = re_fp[clean_keep_mask]
-gamma_true_fp = gamma_true_fp[clean_keep_mask]
-vel_true_fp = vel_true_fp[clean_keep_mask]
-vel_err_fp = vel_err_fp[clean_keep_mask]
-
-thetaE_obs_clean_fp = thetaE_true_fp.copy()
-vel_obs_clean_fp = vel_true_fp.copy()
-thetaE_obs_noisy_fp = thetaE_true_fp + rng_np.normal(0.0, thetaE_err_fp)
-vel_obs_noisy_fp = tool.truncated_normal(vel_true_fp, vel_err_fp, 100.0, 500.0, random_state=rng_np)
-vel_q = np.quantile(vel_obs_clean_fp, [0.01, 0.05, 0.50, 0.95, 0.99])
-step(
-    "FP vel_obs_clean before noisy cuts: "
-    f"min={vel_obs_clean_fp.min():.3f}, q01={vel_q[0]:.3f}, q05={vel_q[1]:.3f}, "
-    f"median={vel_q[2]:.3f}, q95={vel_q[3]:.3f}, q99={vel_q[4]:.3f}, max={vel_obs_clean_fp.max():.3f}"
-)
-
-noisy_keep_mask = vel_obs_noisy_fp <= 400.0
-step(f"Keep {int(noisy_keep_mask.sum())}/{noisy_keep_mask.size} FP systems after noisy vel<=400 cut")
-
-zl_fp = zl_fp[noisy_keep_mask]
-zs_fp = zs_fp[noisy_keep_mask]
-zL_sigma_fp = zL_sigma_fp[noisy_keep_mask]
-zS_sigma_fp = zS_sigma_fp[noisy_keep_mask]
-thetaE_true_fp = thetaE_true_fp[noisy_keep_mask]
-thetaE_err_fp = thetaE_err_fp[noisy_keep_mask]
-re_fp = re_fp[noisy_keep_mask]
-gamma_true_fp = gamma_true_fp[noisy_keep_mask]
-vel_err_fp = vel_err_fp[noisy_keep_mask]
-thetaE_obs_clean_fp = thetaE_obs_clean_fp[noisy_keep_mask]
-vel_obs_clean_fp = vel_obs_clean_fp[noisy_keep_mask]
-thetaE_obs_noisy_fp = thetaE_obs_noisy_fp[noisy_keep_mask]
-vel_obs_noisy_fp = vel_obs_noisy_fp[noisy_keep_mask]
-
-z_true_mask = (zl_fp > 0.0) & (zs_fp > zl_fp)
-step(f"Keep {int(z_true_mask.sum())}/{z_true_mask.size} FP systems after true-z physical cut")
-zl_fp = zl_fp[z_true_mask]
-zs_fp = zs_fp[z_true_mask]
-zL_sigma_fp = zL_sigma_fp[z_true_mask]
-zS_sigma_fp = zS_sigma_fp[z_true_mask]
-thetaE_true_fp = thetaE_true_fp[z_true_mask]
-thetaE_err_fp = thetaE_err_fp[z_true_mask]
-re_fp = re_fp[z_true_mask]
-gamma_true_fp = gamma_true_fp[z_true_mask]
-vel_err_fp = vel_err_fp[z_true_mask]
-thetaE_obs_clean_fp = thetaE_obs_clean_fp[z_true_mask]
-vel_obs_clean_fp = vel_obs_clean_fp[z_true_mask]
-thetaE_obs_noisy_fp = thetaE_obs_noisy_fp[z_true_mask]
-vel_obs_noisy_fp = vel_obs_noisy_fp[z_true_mask]
-
-zl_obs_clean_fp = zl_fp.copy()
-zs_obs_clean_fp = zs_fp.copy()
-zl_obs_noisy_fp = zl_fp + rng_np.normal(0.0, zL_sigma_fp)
-zs_obs_noisy_fp = zs_fp + rng_np.normal(0.0, zS_sigma_fp)
-bad_z_mask = (zl_obs_noisy_fp <= 0.0) | (zs_obs_noisy_fp <= 0.0) | (zs_obs_noisy_fp <= zl_obs_noisy_fp)
-for _ in range(20):
-    if not np.any(bad_z_mask):
-        break
-    zl_obs_noisy_fp[bad_z_mask] = zl_fp[bad_z_mask] + rng_np.normal(0.0, zL_sigma_fp[bad_z_mask])
-    zs_obs_noisy_fp[bad_z_mask] = zs_fp[bad_z_mask] + rng_np.normal(0.0, zS_sigma_fp[bad_z_mask])
-    bad_z_mask = (zl_obs_noisy_fp <= 0.0) | (zs_obs_noisy_fp <= 0.0) | (zs_obs_noisy_fp <= zl_obs_noisy_fp)
-zl_obs_noisy_fp = np.maximum(zl_obs_noisy_fp, 1e-4)
-zs_obs_noisy_fp = np.maximum(zs_obs_noisy_fp, zl_obs_noisy_fp + 1e-4)
-step(
-    "FP noisy z constraints applied: "
-    f"zl_min={zl_obs_noisy_fp.min():.4f}, zs_min={zs_obs_noisy_fp.min():.4f}, "
-    f"min(zs-zl)={(zs_obs_noisy_fp - zl_obs_noisy_fp).min():.4e}"
-)
-
-gamma_err_fp = np.full(zl_fp.size, 0.2)
-n_gamma_obs_fp = min(10000, zl_fp.size)
-gamma_has_obs_fp = np.zeros(zl_fp.size, dtype=bool)
-gamma_obs_idx_fp = rng_np.choice(zl_fp.size, size=n_gamma_obs_fp, replace=False)
-gamma_has_obs_fp[gamma_obs_idx_fp] = True
-gamma_obs_clean_fp = np.zeros(zl_fp.size)
-gamma_obs_clean_fp[gamma_has_obs_fp] = gamma_true_fp[gamma_has_obs_fp]
-gamma_obs_noisy_fp = np.zeros(zl_fp.size)
-gamma_obs_noisy_fp[gamma_has_obs_fp] = gamma_true_fp[gamma_has_obs_fp] + rng_np.normal(
-    0.0, gamma_err_fp[gamma_has_obs_fp]
-)
-
-
-def build_fp(zl_obs, zs_obs, theta_E_obs, vel_obs, gamma_obs):
-    return {
-        "zl": zl_obs,
-        "zs": zs_obs,
-        "zL_err": zL_sigma_fp,
-        "zS_err": zS_sigma_fp,
-        "theta_E": theta_E_obs,
-        "theta_E_err": thetaE_err_fp,
-        "re": re_fp,
-        "vel_obs": vel_obs,
-        "vel_err": vel_err_fp,
-        "gamma_obs": gamma_obs,
-        "gamma_err": gamma_err_fp,
-        "gamma_has_obs": gamma_has_obs_fp,
-    }
-
-
-fp_clean = build_fp(zl_obs_clean_fp, zs_obs_clean_fp, thetaE_obs_clean_fp, vel_obs_clean_fp, gamma_obs_clean_fp)
-fp_noisy = build_fp(zl_obs_noisy_fp, zs_obs_noisy_fp, thetaE_obs_noisy_fp, vel_obs_noisy_fp, gamma_obs_noisy_fp)
 
 # ---------------------------
 # SNe time-delay data (clean + noisy)
@@ -609,7 +438,6 @@ def head_dict(data_dict, N_use=None):
 if TEST_MODE:
     N_DSPL_USE = 50
     N_LENS_USE = 200
-    N_FP_USE = 200
     N_SNE_USE = 10
     N_QUASAR_USE = 30
     num_warmup = 200
@@ -619,7 +447,6 @@ if TEST_MODE:
 else:
     N_DSPL_USE = None
     N_LENS_USE = None
-    N_FP_USE = None
     N_SNE_USE = None
     N_QUASAR_USE = None
     num_warmup = 500
@@ -631,13 +458,11 @@ step("Apply per-probe sample limits for this run mode")
 
 dspl_clean = head_dict(dspl_clean, N_DSPL_USE)
 Lens_clean = head_dict(lens_clean, N_LENS_USE)
-fp_clean = head_dict(fp_clean, N_FP_USE)
 sne_clean = head_dict(sne_clean, N_SNE_USE)
 quasar_clean = head_dict(quasar_clean, N_QUASAR_USE)
 
 dspl_noisy = head_dict(dspl_noisy, N_DSPL_USE)
 Lens_noisy = head_dict(lens_noisy, N_LENS_USE)
-fp_noisy = head_dict(fp_noisy, N_FP_USE)
 sne_noisy = head_dict(sne_noisy, N_SNE_USE)
 quasar_noisy = head_dict(quasar_noisy, N_QUASAR_USE)
 
@@ -661,7 +486,7 @@ def cosmology_model(kind, cosmo_prior, sample_h0=True):
     return cosmo
 
 
-def joint_model(dspl_data=None, lens_data=None, fp_data=None, sne_data=None, quasar_data=None):
+def joint_model(dspl_data=None, lens_data=None, sne_data=None, quasar_data=None):
     cosmo = cosmology_model("waw0cdm", cosmo_prior, sample_h0=True)
 
     lambda_mean = numpyro.sample("lambda_mean", dist.Uniform(0.9, 1.1))
@@ -710,38 +535,6 @@ def joint_model(dspl_data=None, lens_data=None, fp_data=None, sne_data=None, qua
 
             numpyro.sample("gamma_obs_lens", dist.Normal(gamma_i, 0.05), obs=lens_data["gamma_obs"])
             numpyro.sample("vel_lens_like", dist.Normal(vel_pred, lens_data["vel_err"]), obs=lens_data["vel_obs"])
-
-    if fp_data is not None:
-        N_fp = len(fp_data["zl"])
-        with numpyro.plate("fp_redshift", N_fp):
-            zL_fp = numpyro.sample(
-                "zL_fp_latent",
-                dist.TruncatedNormal(fp_data["zl"], fp_data["zL_err"], low=1e-4),
-            )
-            zS_fp = numpyro.sample(
-                "zS_fp_latent",
-                dist.TruncatedNormal(fp_data["zs"], fp_data["zS_err"], low=zL_fp + 1e-4),
-            )
-        _dl_fp, ds_fp, dls_fp = tool.dldsdls(zL_fp, zS_fp, cosmo, n=20)
-        with numpyro.plate("fundamental_plane", N_fp):
-            gamma_fp = numpyro.sample("gamma_fp", dist.TruncatedNormal(gamma_mean, gamma_sigma, low=1.4, high=2.6))
-            beta_fp = numpyro.sample("beta_fp", dist.TruncatedNormal(beta_mean, beta_sigma, low=-0.4, high=0.4))
-            lambda_fp = numpyro.sample("lambda_fp", dist.TruncatedNormal(lambda_mean, lambda_sigma, low=0.8, high=1.2))
-            thetaE_fp = numpyro.sample("thetaE_fp", dist.Normal(fp_data["theta_E"], fp_data["theta_E_err"]))
-            v_interp_fp = jampy_interp(thetaE_fp, gamma_fp, fp_data["re"], beta_fp)
-            vel_pred_fp = v_interp_fp * jnp.sqrt(ds_fp / dls_fp) * jnp.sqrt(lambda_fp)
-            gamma_obs_mask_fp = jnp.asarray(fp_data["gamma_has_obs"])
-            gamma_obs_used_fp = jnp.where(gamma_obs_mask_fp, fp_data["gamma_obs"], gamma_fp)
-            numpyro.sample(
-                "gamma_fp_like",
-                dist.Normal(gamma_fp, fp_data["gamma_err"]).mask(gamma_obs_mask_fp),
-                obs=gamma_obs_used_fp,
-            )
-            numpyro.sample(
-                "vel_fp_like",
-                dist.TruncatedNormal(vel_pred_fp, fp_data["vel_err"], low=50.0, high=400.0),
-                obs=fp_data["vel_obs"],
-            )
 
     if sne_data is not None:
         Dl_sne, Ds_sne, Dls_sne = tool.dldsdls(sne_data["zl"], sne_data["zs"], cosmo, n=20)
@@ -828,28 +621,6 @@ def build_init_values(data):
         init_values["lambda_lens"] = jnp.asarray(lambda_lens)
         init_values["theta_E_i"] = jnp.asarray(theta_E_i)
 
-    fp_data = data.get("fp")
-    if fp_data is not None:
-        zl_true = np.asarray(fp_data["zl"], dtype=np.float64)
-        zs_true = np.asarray(fp_data["zs"], dtype=np.float64)
-        zl_true = np.maximum(zl_true, 1e-3)
-        zs_true = np.maximum(zs_true, zl_true + 1e-3)
-        theta_true = np.asarray(fp_data["theta_E"], dtype=np.float64)
-        theta_true = np.maximum(theta_true, 1e-3)
-        gamma_obs = np.asarray(fp_data["gamma_obs"], dtype=np.float64)
-        gamma_mask = np.asarray(fp_data["gamma_has_obs"], dtype=bool)
-        gamma_fp = np.where(gamma_mask, gamma_obs, 2.0)
-        gamma_fp = np.clip(gamma_fp, 1.401, 2.599)
-        beta_fp = np.zeros_like(gamma_fp, dtype=np.float64)
-        lambda_fp = np.ones_like(gamma_fp, dtype=np.float64)
-        lambda_fp = np.clip(lambda_fp, 0.801, 1.199)
-        init_values["zL_fp_latent"] = jnp.asarray(zl_true)
-        init_values["zS_fp_latent"] = jnp.asarray(zs_true)
-        init_values["gamma_fp"] = jnp.asarray(gamma_fp)
-        init_values["beta_fp"] = jnp.asarray(beta_fp)
-        init_values["lambda_fp"] = jnp.asarray(lambda_fp)
-        init_values["thetaE_fp"] = jnp.asarray(theta_true)
-
     sne_data = data.get("sne")
     if sne_data is not None:
         phi_true_scaled_sne = np.asarray(sne_data["phi_obs"], dtype=np.float64)
@@ -889,7 +660,6 @@ def run_mcmc(data, key, tag):
         key,
         dspl_data=data["dspl"],
         lens_data=data["lens"],
-        fp_data=data["fp"],
         sne_data=data["sne"],
         quasar_data=data["quasar"],
     )
@@ -909,15 +679,8 @@ def run_mcmc(data, key, tag):
     return inf_data
 
 
-fp_clean_joint = fp_clean if INCLUDE_FP_PROBE else None
-fp_noisy_joint = fp_noisy if INCLUDE_FP_PROBE else None
-if INCLUDE_FP_PROBE:
-    step("Include FP probe in joint inference")
-else:
-    step("Disable FP probe in joint inference (INCLUDE_FP_PROBE=False)")
-
-clean_data = {"dspl": dspl_clean, "lens": Lens_clean, "fp": fp_clean_joint, "sne": sne_clean, "quasar": quasar_clean}
-noisy_data = {"dspl": dspl_noisy, "lens": Lens_noisy, "fp": fp_noisy_joint, "sne": sne_noisy, "quasar": quasar_noisy}
+clean_data = {"dspl": dspl_clean, "lens": Lens_clean, "sne": sne_clean, "quasar": quasar_clean}
+noisy_data = {"dspl": dspl_noisy, "lens": Lens_noisy, "sne": sne_noisy, "quasar": quasar_noisy}
 
 key = random.PRNGKey(42)
 key_clean, key_noisy = random.split(key)
