@@ -38,11 +38,10 @@ SEED = 42
 rng_np = np.random.default_rng(SEED)
 np.random.seed(SEED)
 
-TEST_MODE = False
 RUN_NOISY_INFERENCE = False
-RESULT_DIR = Path("/mnt/lustre/tianli/LensedUniverse_result")
+RESULT_DIR = Path(os.environ.get("SLCOSMO_RESULT_DIR", "/mnt/lustre/tianli/LensedUniverse_result"))
 RESULT_DIR.mkdir(parents=True, exist_ok=True)
-FIG_DIR = Path("result")
+FIG_DIR = Path(os.environ.get("SLCOSMO_FIG_DIR", "result"))
 FIG_DIR.mkdir(parents=True, exist_ok=True)
 
 DATA_DIR = Path(os.environ.get("SLCOSMO_DATA_DIR", str(workdir / "data")))
@@ -62,202 +61,24 @@ cosmo_prior = {
 }
 DSPL_TARGET = 500
 PHOTO_FRAC_ZS2 = 0.60
+N_DSPL_USE = None
+N_LENS_USE = None
+N_SNE_USE = None
+N_QUASAR_USE = None
 
-# ---------------------------
-# DSPL data (clean + noisy)
-# ---------------------------
-step("Build DSPL clean/noisy datasets")
-data_dspl = np.loadtxt(DATA_DIR / "EuclidDSPLs_1.txt")
-data_dspl = data_dspl[(data_dspl[:, 5] < 0.95)]
+NUM_WARMUP = 500
+NUM_SAMPLES = 1500
+NUM_CHAINS = 4
+CHAIN_METHOD = "vectorized"
 
-zl_dspl  = data_dspl[:, 0]
-zs1_dspl = data_dspl[:, 1]
-zs2_true_cat = data_dspl[:, 2]
+SECONDS_PER_DAY = 86400.0
+MPC_KM = tool.Mpc / 1000.0
+SIGMA_T_DAYS = 1.0
+SIGMA_PHI_FRAC = 0.04
+SIGMA_LAMBDA_FRAC = 0.08
 
-beta_err_dspl = data_dspl[:, 6]
-model_vel_dspl = data_dspl[:, 11]
-
-step(
-    f"Catalog zs2<=zs1 count: {int(np.sum(zs2_true_cat <= zs1_dspl))}/"
-    f"{len(zs2_true_cat)} (no pre-filter)"
-)
-
-N_all = len(zl_dspl)
-if N_all > DSPL_TARGET:
-    select_idx = np.sort(rng_np.choice(N_all, size=DSPL_TARGET, replace=False))
-    zl_dspl = zl_dspl[select_idx]
-    zs1_dspl = zs1_dspl[select_idx]
-    zs2_true_cat = zs2_true_cat[select_idx]
-    beta_err_dspl = beta_err_dspl[select_idx]
-    model_vel_dspl = model_vel_dspl[select_idx]
-N_dspl = len(zl_dspl)
-
-n_photo = int(round(PHOTO_FRAC_ZS2 * N_dspl))
-n_photo = max(0, min(n_photo, N_dspl))
-is_photo = np.zeros(N_dspl, dtype=bool)
-if n_photo > 0:
-    photo_idx = rng_np.choice(N_dspl, size=n_photo, replace=False)
-    is_photo[photo_idx] = True
-step(
-    f"Use {N_dspl} DSPL systems; source2 photo-z count={int(is_photo.sum())} "
-    f"({float(is_photo.mean()):.2%})"
-)
-zs2_err = np.where(is_photo, 0.1, 1e-4)
-zs2_obs = zs2_true_cat + rng_np.normal(0.0, zs2_err)
-
-eps = 1e-3
-bad = zs2_obs <= (zs1_dspl + eps)
-for _ in range(20):
-    if not np.any(bad):
-        break
-    zs2_obs[bad] = zs2_true_cat[bad] + rng_np.normal(0.0, zs2_err[bad])
-    bad = zs2_obs <= (zs1_dspl + eps)
-zs2_obs = np.maximum(zs2_obs, zs1_dspl + eps)
-
-Dl1, Ds1, Dls1 = tool.compute_distances(zl_dspl, zs1_dspl, cosmo_true)
-Dl2, Ds2, Dls2 = tool.compute_distances(zl_dspl, zs2_true_cat, cosmo_true)
-beta_geom_dspl = Dls1 * Ds2 / (Ds1 * Dls2)
-
-lambda_true_dspl = tool.truncated_normal(1.0, 0.05, 0.85, 1.15, N_dspl, random_state=rng_np)
-lambda_err_dspl = lambda_true_dspl * 0.10
-
-true_vel_dspl = model_vel_dspl * jnp.sqrt(lambda_true_dspl)
-vel_err_dspl = 0.03 * true_vel_dspl
-
-beta_true_dspl = tool.beta_antimst(beta_geom_dspl, mst=lambda_true_dspl)
-
-lambda_obs_dspl_clean = lambda_true_dspl
-beta_obs_dspl_clean = beta_true_dspl
-zs2_use_clean = zs2_true_cat
-
-lambda_obs_dspl_noisy = lambda_true_dspl + np.random.normal(0.0, lambda_err_dspl)
-beta_obs_dspl_noisy = tool.truncated_normal(beta_true_dspl, beta_err_dspl, 0.0, 1.0, random_state=rng_np)
-zs2_use_noisy = zs2_obs
-
-
-def build_dspl(lambda_obs, beta_obs, zs2_use):
-    return {
-        "zl": zl_dspl,
-        "zs1": zs1_dspl,
-        "zs2_cat": zs2_true_cat,
-        "zs2_obs": zs2_use,
-        "zs2_err": zs2_err,
-        "is_photo": is_photo.astype(np.int32),
-        "beta_obs": beta_obs,
-        "beta_err": beta_err_dspl,
-        "v_model": model_vel_dspl,
-        "v_obs": true_vel_dspl,
-        "v_err": vel_err_dspl,
-        "lambda_err": lambda_err_dspl,
-        "lambda_obs": lambda_obs,
-    }
-
-
-dspl_clean = build_dspl(lambda_obs_dspl_clean, beta_obs_dspl_clean, zs2_use_clean)
-dspl_noisy = build_dspl(lambda_obs_dspl_noisy, beta_obs_dspl_noisy, zs2_use_noisy)
-
-# ---------------------------
-# Lens+kin data (clean + noisy)
-# ---------------------------
-step("Build lens+kinematic clean/noisy datasets")
-LUT = np.load(DATA_DIR / "velocity_disp_table.npy")
-N1, N2, N3, N4 = LUT.shape
-thetaE_grid = np.linspace(0.5, 3.0, N1)
-gamma_grid  = np.linspace(1.2, 2.8, N2)
-Re_grid     = np.linspace(0.15, 3.0, N3)
-beta_grid   = np.linspace(-0.5, 0.8, N4)
-jampy_interp = tool.make_4d_interpolant(thetaE_grid, gamma_grid, Re_grid, beta_grid, LUT)
-
-Euclid_GG_data = np.loadtxt(DATA_DIR / "Euclid_len.txt")
-zl_lens = Euclid_GG_data[:, 0]
-zs_lens = Euclid_GG_data[:, 1]
-Ein_lens = Euclid_GG_data[:, 2]
-re_lens = Euclid_GG_data[:, 5]
-
-mask_lens = (Ein_lens >= 0.6) & (re_lens >= 0.25) & (re_lens <= 2.8)
-zl_lens = zl_lens[mask_lens]
-zs_lens = zs_lens[mask_lens]
-thetaE_lens = Ein_lens[mask_lens]
-re_lens = re_lens[mask_lens]
-
-dl_lens, ds_lens, dls_lens = tool.dldsdls(zl_lens, zs_lens, cosmo_true, n=20)
-N_lens = len(zl_lens)
-
-gamma_true_lens = tool.truncated_normal(2.0, 0.2, 1.5, 2.5, N_lens, random_state=rng_np)
-beta_true_lens  = tool.truncated_normal(0.0, 0.2, -0.4, 0.4, N_lens, random_state=rng_np)
-vel_model_lens = jampy_interp(thetaE_lens, gamma_true_lens, re_lens, beta_true_lens) * jnp.sqrt(ds_lens / dls_lens)
-lambda_true_lens = tool.truncated_normal(1.0, 0.05, 0.8, 1.2, N_lens, random_state=rng_np)
-vel_true_lens = vel_model_lens * jnp.sqrt(lambda_true_lens)
-
-theta_E_err = 0.01 * thetaE_lens
-vel_err_lens = 0.10 * vel_true_lens
-
-gamma_obs_clean = gamma_true_lens
-thetaE_obs_clean = thetaE_lens
-vel_obs_clean = vel_true_lens
-
-gamma_obs_noisy = gamma_true_lens + tool.truncated_normal(0.0, 0.05, -0.2, 0.2, N_lens, random_state=rng_np)
-thetaE_obs_noisy = thetaE_lens + np.random.normal(0.0, theta_E_err)
-vel_obs_noisy = np.random.normal(vel_true_lens, vel_err_lens)
-
-
-def build_lens(gamma_obs, theta_E_obs, vel_obs):
-    return {
-        "zl": zl_lens,
-        "zs": zs_lens,
-        "theta_E": theta_E_obs,
-        "theta_E_err": theta_E_err,
-        "re": re_lens,
-        "gamma_obs": gamma_obs,
-        "vel_obs": vel_obs,
-        "vel_err": vel_err_lens,
-    }
-
-lens_clean = build_lens(gamma_obs_clean, thetaE_obs_clean, vel_obs_clean)
-lens_noisy = build_lens(gamma_obs_noisy, thetaE_obs_noisy, vel_obs_noisy)
-
-# ---------------------------
-# SNe time-delay data (clean + noisy)
-# ---------------------------
-step("Build SNe clean/noisy datasets")
-sn_data = pd.read_csv(DATA_DIR / "Euclid_150SNe.csv")
-sn_data = sn_data[(sn_data["tmax"] >= 5) & (sn_data["tmax"] <= 80)]
-sn_data = sn_data.nlargest(100, "tmax")
-zl_sne = np.array(sn_data["zl"])
-zs_sne = np.array(sn_data["z_host"])
-t_delay_true_days = np.array(sn_data["tmax"])
-
-Dl_sne, Ds_sne, Dls_sne = tool.dldsdls(zl_sne, zs_sne, cosmo_true, n=20)
-Ddt_geom_sne = (1.0 + zl_sne) * Dl_sne * Ds_sne / Dls_sne
-
-N_sne = len(zl_sne)
-
-lambda_pop_mean = 1.0
-lambda_pop_sigma = 0.05
-lambda_low, lambda_high = 0.8, 1.2
-lambda_true_sne = tool.truncated_normal(lambda_pop_mean, lambda_pop_sigma, lambda_low, lambda_high, N_sne, random_state=rng_np)
-
-seconds_per_day = 86400.0
-Mpc_km = tool.Mpc / 1000.0
-
-fermat_phi_true = (tool.c_km_s * t_delay_true_days * seconds_per_day) / (Ddt_geom_sne * Mpc_km)
-
-t_delay_true_mst = t_delay_true_days * lambda_true_sne
-
-sigma_t_days = 1.0
-sigma_phi_frac = 0.04
-sigma_lambda_frac = 0.08
-
-if True:
-    t_delay_obs_clean = t_delay_true_mst.copy()
-    fermat_phi_obs_clean = fermat_phi_true.copy()
-    lambda_obs_clean = lambda_true_sne.copy()
-
-    t_delay_obs_noisy = t_delay_true_mst + np.random.normal(0.0, sigma_t_days, size=N_sne)
-    fermat_phi_obs_noisy = fermat_phi_true + np.random.normal(0.0, sigma_phi_frac * np.abs(fermat_phi_true))
-    lambda_obs_noisy = lambda_true_sne + np.random.normal(0.0, sigma_lambda_frac * np.abs(lambda_true_sne))
-
-lambda_err_sne = sigma_lambda_frac * np.abs(lambda_obs_clean)
+QUASAR_JSON = Path("../Temp_data/static_datavectors_seed6.json")
+jampy_interp = None
 
 
 def scale_phi(phi_obs):
@@ -271,200 +92,358 @@ def scale_phi(phi_obs):
     scale = 10.0 ** exp
     return phi_obs * scale, scale
 
-fermat_phi_obs_clean_scaled, phi_scale_sne = scale_phi(fermat_phi_obs_clean)
-fermat_phi_obs_noisy_scaled = fermat_phi_obs_noisy * phi_scale_sne
 
-sne_clean = {
-    "zl": zl_sne,
-    "zs": zs_sne,
-    "t_obs": t_delay_obs_clean,
-    "phi_obs": fermat_phi_obs_clean_scaled,
-    "phi_scale": phi_scale_sne,
-    "lambda_obs": lambda_obs_clean,
-    "lambda_err": lambda_err_sne,
-}
-
-sne_noisy = {
-    "zl": zl_sne,
-    "zs": zs_sne,
-    "t_obs": t_delay_obs_noisy,
-    "phi_obs": fermat_phi_obs_noisy_scaled,
-    "phi_scale": phi_scale_sne,
-    "lambda_obs": lambda_obs_noisy,
-    "lambda_err": lambda_err_sne,
-}
-
-# ---------------------------
-# Quasar time-delay data (clean + noisy)
-# ---------------------------
-step("Build quasar clean/noisy datasets")
-DATA_JSON = Path("../Temp_data/static_datavectors_seed6.json")
-with DATA_JSON.open("r") as f:
-    quasar_blocks = json.load(f)
-
-z_lens_list = []
-z_src_list = []
-t_base_list = []
-t_err_list = []
-block_id_list = []
-
-for b, block in enumerate(quasar_blocks):
-    z_lens = np.asarray(block["z_lens"], dtype=float)
-    z_src = np.asarray(block["z_src"], dtype=float)
-
-    td = np.asarray(block["td_measured"], dtype=float)
-    td_mean = td.mean(axis=1)
-
-    n_lens, n_td = td_mean.shape
-    if n_td == 3:
-        idx = np.argmax(np.abs(td_mean), axis=1)
-        t_base = np.abs(td_mean[np.arange(n_lens), idx])
-    else:
-        t_base = np.abs(td_mean[:, 0])
-
-    if b in (0, 1, 2):
-        t_err = 0.03 * t_base
-    else:
-        t_err = np.full_like(t_base, 5.0)
-
-    z_lens_list.append(z_lens)
-    z_src_list.append(z_src)
-    t_base_list.append(t_base)
-    t_err_list.append(t_err)
-    block_id_list.append(np.full(n_lens, b, dtype=int))
-
-z_lens_q = np.concatenate(z_lens_list)
-z_src_q = np.concatenate(z_src_list)
-t_base_q = np.concatenate(t_base_list)
-t_err_q = np.concatenate(t_err_list)
-block_id_q = np.concatenate(block_id_list)
-
-zl_j = jnp.asarray(z_lens_q)
-zs_j = jnp.asarray(z_src_q)
-Dl_q, Ds_q, Dls_q = tool.dldsdls(zl_j, zs_j, cosmo_true, n=20)
-Ddt_geom_q = (1.0 + zl_j) * Dl_q * Ds_q / Dls_q
-Ddt_geom_q = np.asarray(Ddt_geom_q)
-
-c_km_day = tool.c_km_s * 86400.0
-Mpc_km = tool.Mpc / 1000.0
-
-phi_true_q = (c_km_day * t_base_q) / (Ddt_geom_q * Mpc_km)
-
-phi_err_frac_by_block = {
-    0: 0.02,
-    1: 0.05,
-    2: 0.05,
-    3: 0.11,
-    4: 0.11,
-    5: 0.18,
-    6: 0.18,
-    7: 0.18,
-    8: 0.18,
-}
-
-sigma_v_frac_by_block = {
-    0: 0.03,
-    1: 0.03,
-    2: 0.03,
-    3: 0.10,
-    4: 0.10,
-    5: 0.10,
-    6: 0.10,
-    7: np.nan,
-    8: np.nan,
-}
-
-phi_err_frac_q = np.asarray([phi_err_frac_by_block[b] for b in block_id_q])
-phi_err_q = phi_err_frac_q * np.abs(phi_true_q)
-
-lambda_true_q = tool.truncated_normal(1.0, 0.05, 0.8, 1.2, z_lens_q.size, random_state=rng_np)
-
-sigma_v_frac_q = np.asarray([sigma_v_frac_by_block[b] for b in block_id_q])
-mst_mask_q = np.isfinite(sigma_v_frac_q)
-mst_err_frac_q = 2.0 * sigma_v_frac_q
-lambda_err_q = np.where(mst_mask_q, mst_err_frac_q * np.abs(lambda_true_q), 0.05)
-
-t_true_q = t_base_q * lambda_true_q
-
-phi_obs_q_clean = phi_true_q.copy()
-phi_obs_q_noisy = phi_true_q + rng_np.normal(0.0, phi_err_q)
-
-phi_obs_q_clean_scaled, phi_scale_q = scale_phi(phi_obs_q_clean)
-phi_obs_q_noisy_scaled = phi_obs_q_noisy * phi_scale_q
-
-lambda_obs_q_clean = lambda_true_q.copy()
-lambda_obs_q_noisy = lambda_true_q + rng_np.normal(0.0, lambda_err_q)
-
-t_obs_q_clean = t_true_q.copy()
-t_obs_q_noisy = t_true_q + rng_np.normal(0.0, t_err_q)
-
-quasar_clean = {
-    "zl": z_lens_q,
-    "zs": z_src_q,
-    "t_obs": t_obs_q_clean,
-    "t_err": t_err_q,
-    "phi_obs": phi_obs_q_clean_scaled,
-    "phi_err": phi_err_frac_q * np.abs(phi_obs_q_clean_scaled),
-    "phi_scale": phi_scale_q,
-    "lambda_obs": lambda_obs_q_clean,
-    "lambda_err": lambda_err_q,
-    "mst_mask": mst_mask_q,
-}
-
-quasar_noisy = {
-    "zl": z_lens_q,
-    "zs": z_src_q,
-    "t_obs": t_obs_q_noisy,
-    "t_err": t_err_q,
-    "phi_obs": phi_obs_q_noisy_scaled,
-    "phi_err": phi_err_frac_q * np.abs(phi_obs_q_noisy_scaled),
-    "phi_scale": phi_scale_q,
-    "lambda_obs": lambda_obs_q_noisy,
-    "lambda_err": lambda_err_q,
-    "mst_mask": mst_mask_q,
-}
-
-
-def head_dict(data_dict, N_use=None):
+def head_dict(data_dict, n_use=None):
     out = {}
     for k, v in data_dict.items():
         arr = np.asarray(v)
         if arr.shape == ():
             out[k] = arr
         else:
-            out[k] = arr[:N_use] if N_use is not None else arr
+            out[k] = arr[:n_use] if n_use is not None else arr
     return out
 
-if TEST_MODE:
-    N_DSPL_USE = 50
-    N_LENS_USE = 200
-    N_SNE_USE = 10
-    N_QUASAR_USE = 30
-    num_warmup = 200
-    num_samples = 200
-    num_chains = 2
-    chain_method = "sequential"
-else:
-    N_DSPL_USE = None
-    N_LENS_USE = None
-    N_SNE_USE = None
-    N_QUASAR_USE = None
-    num_warmup = 500
-    num_samples = 1500
-    num_chains = 4
-    chain_method = "vectorized"
 
-step("Apply per-probe sample limits for this run mode")
+def build_dspl_datasets(rng):
+    step("Build DSPL clean/noisy datasets")
+    data_dspl = np.loadtxt(DATA_DIR / "EuclidDSPLs_1.txt")
+    data_dspl = data_dspl[(data_dspl[:, 5] < 0.95)]
 
-dspl_clean = head_dict(dspl_clean, N_DSPL_USE)
-Lens_clean = head_dict(lens_clean, N_LENS_USE)
-sne_clean = head_dict(sne_clean, N_SNE_USE)
-quasar_clean = head_dict(quasar_clean, N_QUASAR_USE)
+    zl_dspl = data_dspl[:, 0]
+    zs1_dspl = data_dspl[:, 1]
+    zs2_true_cat = data_dspl[:, 2]
+    beta_err_dspl = data_dspl[:, 6]
+    model_vel_dspl = data_dspl[:, 11]
 
-dspl_noisy = head_dict(dspl_noisy, N_DSPL_USE)
-Lens_noisy = head_dict(lens_noisy, N_LENS_USE)
-sne_noisy = head_dict(sne_noisy, N_SNE_USE)
-quasar_noisy = head_dict(quasar_noisy, N_QUASAR_USE)
+    step(
+        f"Catalog zs2<=zs1 count: {int(np.sum(zs2_true_cat <= zs1_dspl))}/"
+        f"{len(zs2_true_cat)} (no pre-filter)"
+    )
+
+    n_all = len(zl_dspl)
+    if n_all > DSPL_TARGET:
+        select_idx = np.sort(rng.choice(n_all, size=DSPL_TARGET, replace=False))
+        zl_dspl = zl_dspl[select_idx]
+        zs1_dspl = zs1_dspl[select_idx]
+        zs2_true_cat = zs2_true_cat[select_idx]
+        beta_err_dspl = beta_err_dspl[select_idx]
+        model_vel_dspl = model_vel_dspl[select_idx]
+    n_dspl = len(zl_dspl)
+
+    n_photo = int(round(PHOTO_FRAC_ZS2 * n_dspl))
+    n_photo = max(0, min(n_photo, n_dspl))
+    is_photo = np.zeros(n_dspl, dtype=bool)
+    if n_photo > 0:
+        photo_idx = rng.choice(n_dspl, size=n_photo, replace=False)
+        is_photo[photo_idx] = True
+    step(
+        f"Use {n_dspl} DSPL systems; source2 photo-z count={int(is_photo.sum())} "
+        f"({float(is_photo.mean()):.2%})"
+    )
+    zs2_err = np.where(is_photo, 0.1, 1e-4)
+    zs2_obs = zs2_true_cat + rng.normal(0.0, zs2_err)
+
+    eps = 1e-3
+    bad = zs2_obs <= (zs1_dspl + eps)
+    for _ in range(20):
+        if not np.any(bad):
+            break
+        zs2_obs[bad] = zs2_true_cat[bad] + rng.normal(0.0, zs2_err[bad])
+        bad = zs2_obs <= (zs1_dspl + eps)
+    zs2_obs = np.maximum(zs2_obs, zs1_dspl + eps)
+
+    Dl1, Ds1, Dls1 = tool.compute_distances(zl_dspl, zs1_dspl, cosmo_true)
+    Dl2, Ds2, Dls2 = tool.compute_distances(zl_dspl, zs2_true_cat, cosmo_true)
+    beta_geom_dspl = Dls1 * Ds2 / (Ds1 * Dls2)
+
+    lambda_true_dspl = tool.truncated_normal(1.0, 0.05, 0.85, 1.15, n_dspl, random_state=rng)
+    lambda_err_dspl = lambda_true_dspl * 0.10
+
+    true_vel_dspl = model_vel_dspl * jnp.sqrt(lambda_true_dspl)
+    vel_err_dspl = 0.03 * true_vel_dspl
+
+    beta_true_dspl = tool.beta_antimst(beta_geom_dspl, mst=lambda_true_dspl)
+
+    lambda_obs_dspl_clean = lambda_true_dspl
+    beta_obs_dspl_clean = beta_true_dspl
+    zs2_use_clean = zs2_true_cat
+
+    lambda_obs_dspl_noisy = lambda_true_dspl + rng.normal(0.0, lambda_err_dspl)
+    beta_obs_dspl_noisy = tool.truncated_normal(beta_true_dspl, beta_err_dspl, 0.0, 1.0, random_state=rng)
+    zs2_use_noisy = zs2_obs
+
+    def build_dspl(lambda_obs, beta_obs, zs2_use):
+        return {
+            "zl": zl_dspl,
+            "zs1": zs1_dspl,
+            "zs2_cat": zs2_true_cat,
+            "zs2_obs": zs2_use,
+            "zs2_err": zs2_err,
+            "is_photo": is_photo.astype(np.int32),
+            "beta_obs": beta_obs,
+            "beta_err": beta_err_dspl,
+            "v_model": model_vel_dspl,
+            "v_obs": true_vel_dspl,
+            "v_err": vel_err_dspl,
+            "lambda_err": lambda_err_dspl,
+            "lambda_obs": lambda_obs,
+        }
+
+    dspl_clean = build_dspl(lambda_obs_dspl_clean, beta_obs_dspl_clean, zs2_use_clean)
+    dspl_noisy = build_dspl(lambda_obs_dspl_noisy, beta_obs_dspl_noisy, zs2_use_noisy)
+    return dspl_clean, dspl_noisy
+
+
+def build_lens_datasets(rng):
+    global jampy_interp
+    step("Build lens+kinematic clean/noisy datasets")
+
+    lut = np.load(DATA_DIR / "velocity_disp_table.npy")
+    n1, n2, n3, n4 = lut.shape
+    thetae_grid = np.linspace(0.5, 3.0, n1)
+    gamma_grid = np.linspace(1.2, 2.8, n2)
+    re_grid = np.linspace(0.15, 3.0, n3)
+    beta_grid = np.linspace(-0.5, 0.8, n4)
+    jampy_interp = tool.make_4d_interpolant(thetae_grid, gamma_grid, re_grid, beta_grid, lut)
+
+    euclid_gg_data = np.loadtxt(DATA_DIR / "Euclid_len.txt")
+    zl_lens = euclid_gg_data[:, 0]
+    zs_lens = euclid_gg_data[:, 1]
+    ein_lens = euclid_gg_data[:, 2]
+    re_lens = euclid_gg_data[:, 5]
+
+    mask_lens = (ein_lens >= 0.6) & (re_lens >= 0.25) & (re_lens <= 2.8)
+    zl_lens = zl_lens[mask_lens]
+    zs_lens = zs_lens[mask_lens]
+    thetae_lens = ein_lens[mask_lens]
+    re_lens = re_lens[mask_lens]
+
+    _, ds_lens, dls_lens = tool.dldsdls(zl_lens, zs_lens, cosmo_true, n=20)
+    n_lens = len(zl_lens)
+
+    gamma_true_lens = tool.truncated_normal(2.0, 0.2, 1.5, 2.5, n_lens, random_state=rng)
+    beta_true_lens = tool.truncated_normal(0.0, 0.2, -0.4, 0.4, n_lens, random_state=rng)
+    vel_model_lens = jampy_interp(thetae_lens, gamma_true_lens, re_lens, beta_true_lens) * jnp.sqrt(ds_lens / dls_lens)
+    lambda_true_lens = tool.truncated_normal(1.0, 0.05, 0.8, 1.2, n_lens, random_state=rng)
+    vel_true_lens = vel_model_lens * jnp.sqrt(lambda_true_lens)
+
+    theta_e_err = 0.01 * thetae_lens
+    vel_err_lens = 0.10 * vel_true_lens
+
+    gamma_obs_clean = gamma_true_lens
+    thetae_obs_clean = thetae_lens
+    vel_obs_clean = vel_true_lens
+
+    gamma_obs_noisy = gamma_true_lens + tool.truncated_normal(0.0, 0.05, -0.2, 0.2, n_lens, random_state=rng)
+    thetae_obs_noisy = thetae_lens + rng.normal(0.0, theta_e_err)
+    vel_obs_noisy = rng.normal(vel_true_lens, vel_err_lens)
+
+    def build_lens(gamma_obs, theta_e_obs, vel_obs):
+        return {
+            "zl": zl_lens,
+            "zs": zs_lens,
+            "theta_E": theta_e_obs,
+            "theta_E_err": theta_e_err,
+            "re": re_lens,
+            "gamma_obs": gamma_obs,
+            "vel_obs": vel_obs,
+            "vel_err": vel_err_lens,
+        }
+
+    lens_clean = build_lens(gamma_obs_clean, thetae_obs_clean, vel_obs_clean)
+    lens_noisy = build_lens(gamma_obs_noisy, thetae_obs_noisy, vel_obs_noisy)
+    return lens_clean, lens_noisy
+
+
+def build_sne_datasets(rng):
+    step("Build SNe clean/noisy datasets")
+    sn_data = pd.read_csv(DATA_DIR / "Euclid_150SNe.csv")
+    sn_data = sn_data[(sn_data["tmax"] >= 5) & (sn_data["tmax"] <= 80)]
+    sn_data = sn_data.nlargest(100, "tmax")
+
+    zl_sne = np.array(sn_data["zl"])
+    zs_sne = np.array(sn_data["z_host"])
+    t_delay_true_days = np.array(sn_data["tmax"])
+
+    Dl_sne, Ds_sne, Dls_sne = tool.dldsdls(zl_sne, zs_sne, cosmo_true, n=20)
+    ddt_geom_sne = (1.0 + zl_sne) * Dl_sne * Ds_sne / Dls_sne
+    n_sne = len(zl_sne)
+
+    lambda_true_sne = tool.truncated_normal(1.0, 0.05, 0.8, 1.2, n_sne, random_state=rng)
+    fermat_phi_true = (tool.c_km_s * t_delay_true_days * SECONDS_PER_DAY) / (ddt_geom_sne * MPC_KM)
+    t_delay_true_mst = t_delay_true_days * lambda_true_sne
+
+    t_delay_obs_clean = t_delay_true_mst.copy()
+    fermat_phi_obs_clean = fermat_phi_true.copy()
+    lambda_obs_clean = lambda_true_sne.copy()
+
+    t_delay_obs_noisy = t_delay_true_mst + rng.normal(0.0, SIGMA_T_DAYS, size=n_sne)
+    fermat_phi_obs_noisy = fermat_phi_true + rng.normal(0.0, SIGMA_PHI_FRAC * np.abs(fermat_phi_true))
+    lambda_obs_noisy = lambda_true_sne + rng.normal(0.0, SIGMA_LAMBDA_FRAC * np.abs(lambda_true_sne))
+    lambda_err_sne = SIGMA_LAMBDA_FRAC * np.abs(lambda_obs_clean)
+
+    fermat_phi_obs_clean_scaled, phi_scale_sne = scale_phi(fermat_phi_obs_clean)
+    fermat_phi_obs_noisy_scaled = fermat_phi_obs_noisy * phi_scale_sne
+
+    sne_clean = {
+        "zl": zl_sne,
+        "zs": zs_sne,
+        "t_obs": t_delay_obs_clean,
+        "phi_obs": fermat_phi_obs_clean_scaled,
+        "phi_scale": phi_scale_sne,
+        "lambda_obs": lambda_obs_clean,
+        "lambda_err": lambda_err_sne,
+    }
+    sne_noisy = {
+        "zl": zl_sne,
+        "zs": zs_sne,
+        "t_obs": t_delay_obs_noisy,
+        "phi_obs": fermat_phi_obs_noisy_scaled,
+        "phi_scale": phi_scale_sne,
+        "lambda_obs": lambda_obs_noisy,
+        "lambda_err": lambda_err_sne,
+    }
+    return sne_clean, sne_noisy
+
+
+def build_quasar_datasets(rng):
+    step("Build quasar clean/noisy datasets")
+    with QUASAR_JSON.open("r") as f:
+        quasar_blocks = json.load(f)
+
+    z_lens_list = []
+    z_src_list = []
+    t_base_list = []
+    t_err_list = []
+    block_id_list = []
+    for b, block in enumerate(quasar_blocks):
+        z_lens = np.asarray(block["z_lens"], dtype=float)
+        z_src = np.asarray(block["z_src"], dtype=float)
+        td = np.asarray(block["td_measured"], dtype=float)
+        td_mean = td.mean(axis=1)
+
+        n_lens, n_td = td_mean.shape
+        if n_td == 3:
+            idx = np.argmax(np.abs(td_mean), axis=1)
+            t_base = np.abs(td_mean[np.arange(n_lens), idx])
+        else:
+            t_base = np.abs(td_mean[:, 0])
+
+        if b in (0, 1, 2):
+            t_err = 0.03 * t_base
+        else:
+            t_err = np.full_like(t_base, 5.0)
+
+        z_lens_list.append(z_lens)
+        z_src_list.append(z_src)
+        t_base_list.append(t_base)
+        t_err_list.append(t_err)
+        block_id_list.append(np.full(n_lens, b, dtype=int))
+
+    z_lens_q = np.concatenate(z_lens_list)
+    z_src_q = np.concatenate(z_src_list)
+    t_base_q = np.concatenate(t_base_list)
+    t_err_q = np.concatenate(t_err_list)
+    block_id_q = np.concatenate(block_id_list)
+
+    zl_j = jnp.asarray(z_lens_q)
+    zs_j = jnp.asarray(z_src_q)
+    Dl_q, Ds_q, Dls_q = tool.dldsdls(zl_j, zs_j, cosmo_true, n=20)
+    ddt_geom_q = np.asarray((1.0 + zl_j) * Dl_q * Ds_q / Dls_q)
+
+    c_km_day = tool.c_km_s * SECONDS_PER_DAY
+    phi_true_q = (c_km_day * t_base_q) / (ddt_geom_q * MPC_KM)
+
+    phi_err_frac_by_block = {
+        0: 0.02,
+        1: 0.05,
+        2: 0.05,
+        3: 0.11,
+        4: 0.11,
+        5: 0.18,
+        6: 0.18,
+        7: 0.18,
+        8: 0.18,
+    }
+    sigma_v_frac_by_block = {
+        0: 0.03,
+        1: 0.03,
+        2: 0.03,
+        3: 0.10,
+        4: 0.10,
+        5: 0.10,
+        6: 0.10,
+        7: np.nan,
+        8: np.nan,
+    }
+    phi_err_frac_q = np.asarray([phi_err_frac_by_block[b] for b in block_id_q])
+    phi_err_q = phi_err_frac_q * np.abs(phi_true_q)
+
+    lambda_true_q = tool.truncated_normal(1.0, 0.05, 0.8, 1.2, z_lens_q.size, random_state=rng)
+    sigma_v_frac_q = np.asarray([sigma_v_frac_by_block[b] for b in block_id_q])
+    mst_mask_q = np.isfinite(sigma_v_frac_q)
+    mst_err_frac_q = 2.0 * sigma_v_frac_q
+    lambda_err_q = np.where(mst_mask_q, mst_err_frac_q * np.abs(lambda_true_q), 0.05)
+    t_true_q = t_base_q * lambda_true_q
+
+    phi_obs_q_clean = phi_true_q.copy()
+    phi_obs_q_noisy = phi_true_q + rng.normal(0.0, phi_err_q)
+    phi_obs_q_clean_scaled, phi_scale_q = scale_phi(phi_obs_q_clean)
+    phi_obs_q_noisy_scaled = phi_obs_q_noisy * phi_scale_q
+
+    lambda_obs_q_clean = lambda_true_q.copy()
+    lambda_obs_q_noisy = lambda_true_q + rng.normal(0.0, lambda_err_q)
+
+    t_obs_q_clean = t_true_q.copy()
+    t_obs_q_noisy = t_true_q + rng.normal(0.0, t_err_q)
+
+    quasar_clean = {
+        "zl": z_lens_q,
+        "zs": z_src_q,
+        "t_obs": t_obs_q_clean,
+        "t_err": t_err_q,
+        "phi_obs": phi_obs_q_clean_scaled,
+        "phi_err": phi_err_frac_q * np.abs(phi_obs_q_clean_scaled),
+        "phi_scale": phi_scale_q,
+        "lambda_obs": lambda_obs_q_clean,
+        "lambda_err": lambda_err_q,
+        "mst_mask": mst_mask_q,
+    }
+    quasar_noisy = {
+        "zl": z_lens_q,
+        "zs": z_src_q,
+        "t_obs": t_obs_q_noisy,
+        "t_err": t_err_q,
+        "phi_obs": phi_obs_q_noisy_scaled,
+        "phi_err": phi_err_frac_q * np.abs(phi_obs_q_noisy_scaled),
+        "phi_scale": phi_scale_q,
+        "lambda_obs": lambda_obs_q_noisy,
+        "lambda_err": lambda_err_q,
+        "mst_mask": mst_mask_q,
+    }
+    return quasar_clean, quasar_noisy
+
+
+def build_joint_datasets(rng):
+    dspl_clean, dspl_noisy = build_dspl_datasets(rng)
+    lens_clean, lens_noisy = build_lens_datasets(rng)
+    sne_clean, sne_noisy = build_sne_datasets(rng)
+    quasar_clean, quasar_noisy = build_quasar_datasets(rng)
+
+    step("Apply per-probe sample limits")
+    clean_data = {
+        "dspl": head_dict(dspl_clean, N_DSPL_USE),
+        "lens": head_dict(lens_clean, N_LENS_USE),
+        "sne": head_dict(sne_clean, N_SNE_USE),
+        "quasar": head_dict(quasar_clean, N_QUASAR_USE),
+    }
+    noisy_data = {
+        "dspl": head_dict(dspl_noisy, N_DSPL_USE),
+        "lens": head_dict(lens_noisy, N_LENS_USE),
+        "sne": head_dict(sne_noisy, N_SNE_USE),
+        "quasar": head_dict(quasar_noisy, N_QUASAR_USE),
+    }
+    return clean_data, noisy_data
 
 
 def cosmology_model(kind, cosmo_prior, sample_h0=True):
@@ -523,6 +502,8 @@ def joint_model(dspl_data=None, lens_data=None, sne_data=None, quasar_data=None)
             numpyro.sample("beta_dspl_like", dist.TruncatedNormal(beta_mst, dspl_data["beta_err"], low=0.0, high=1.0), obs=dspl_data["beta_obs"])
 
     if lens_data is not None:
+        if jampy_interp is None:
+            raise RuntimeError("jampy_interp is not initialized. Run data generation before HMC.")
         dl_lens, ds_lens, dls_lens = tool.dldsdls(lens_data["zl"], lens_data["zs"], cosmo, n=20)
         N_lens = len(lens_data["zl"])
         with numpyro.plate("lens", N_lens):
@@ -546,7 +527,7 @@ def joint_model(dspl_data=None, lens_data=None, sne_data=None, quasar_data=None)
         phi_scale = sne_data["phi_scale"]
         lambda_obs = sne_data["lambda_obs"]
         lambda_err = sne_data["lambda_err"]
-        sigma_phi = sigma_phi_frac * phi_obs
+        sigma_phi = SIGMA_PHI_FRAC * jnp.abs(phi_obs)
 
         with numpyro.plate("sne", N_sne):
             phi_true_scaled = numpyro.sample("phi_true_scaled_sne", dist.TruncatedNormal(phi_obs, sigma_phi, low=0.0, high=10.0))
@@ -555,8 +536,8 @@ def joint_model(dspl_data=None, lens_data=None, sne_data=None, quasar_data=None)
 
             phi_true = phi_true_scaled / phi_scale
             Ddt_true = Ddt_geom * lambda_sne
-            t_model_days = (Ddt_true * Mpc_km / tool.c_km_s) * phi_true / seconds_per_day
-            numpyro.sample("t_delay_sne_like", dist.Normal(t_model_days, sigma_t_days), obs=t_obs)
+            t_model_days = (Ddt_true * MPC_KM / tool.c_km_s) * phi_true / SECONDS_PER_DAY
+            numpyro.sample("t_delay_sne_like", dist.Normal(t_model_days, SIGMA_T_DAYS), obs=t_obs)
 
     if quasar_data is not None:
         Dl_q, Ds_q, Dls_q = tool.dldsdls(quasar_data["zl"], quasar_data["zs"], cosmo, n=20)
@@ -579,7 +560,7 @@ def joint_model(dspl_data=None, lens_data=None, sne_data=None, quasar_data=None)
 
             phi_true = phi_true_scaled / phi_scale
             Ddt_true = Ddt_geom_q * lambda_q
-            t_model_days = (Ddt_true * Mpc_km / tool.c_km_s) * phi_true / seconds_per_day
+            t_model_days = (Ddt_true * MPC_KM / tool.c_km_s) * phi_true / SECONDS_PER_DAY
             numpyro.sample("t_delay_q_like", dist.Normal(t_model_days, t_err), obs=t_obs)
 
 
@@ -650,10 +631,10 @@ def run_mcmc(data, key, tag):
     )
     mcmc = MCMC(
         nuts,
-        num_warmup=num_warmup,
-        num_samples=num_samples,
-        num_chains=num_chains,
-        chain_method=chain_method,
+        num_warmup=NUM_WARMUP,
+        num_samples=NUM_SAMPLES,
+        num_chains=NUM_CHAINS,
+        chain_method=CHAIN_METHOD,
         progress_bar=True,
     )
     mcmc.run(
@@ -702,25 +683,30 @@ def run_mcmc(data, key, tag):
     return inf_data
 
 
-clean_data = {"dspl": dspl_clean, "lens": Lens_clean, "sne": sne_clean, "quasar": quasar_clean}
-noisy_data = {"dspl": dspl_noisy, "lens": Lens_noisy, "sne": sne_noisy, "quasar": quasar_noisy}
+def main():
+    step("Generate all probe datasets")
+    clean_data, noisy_data = build_joint_datasets(rng_np)
 
-key = random.PRNGKey(42)
-key_clean, key_noisy = random.split(key)
+    key = random.PRNGKey(SEED)
+    key_clean, key_noisy = random.split(key)
 
-step("Execute clean joint run")
-idata_clean = run_mcmc(clean_data, key_clean, "clean")
+    step("Execute clean joint run")
+    idata_clean = run_mcmc(clean_data, key_clean, "clean")
 
-if RUN_NOISY_INFERENCE:
-    step("Execute noisy joint run")
-    idata_noisy = run_mcmc(noisy_data, key_noisy, "noisy")
+    if RUN_NOISY_INFERENCE:
+        step("Execute noisy joint run")
+        idata_noisy = run_mcmc(noisy_data, key_noisy, "noisy")
 
-    step("Create overlay corner plot")
-    corner_vars = select_corner_vars(
-        idata_clean,
-        idata_noisy,
-        ["h0", "Omegam", "w0", "wa", "lambda_mean", "lambda_sigma", "gamma_mean", "gamma_sigma", "beta_mean", "beta_sigma"],
-    )
-    make_overlay_corner(idata_clean, idata_noisy, corner_vars, FIG_DIR / "joint_corner_overlay.pdf")
-else:
-    step("Skip noisy joint inference (RUN_NOISY_INFERENCE=False)")
+        step("Create overlay corner plot")
+        corner_vars = select_corner_vars(
+            idata_clean,
+            idata_noisy,
+            ["h0", "Omegam", "w0", "wa", "lambda_mean", "lambda_sigma", "gamma_mean", "gamma_sigma", "beta_mean", "beta_sigma"],
+        )
+        make_overlay_corner(idata_clean, idata_noisy, corner_vars, FIG_DIR / "joint_corner_overlay.pdf")
+    else:
+        step("Skip noisy joint inference (RUN_NOISY_INFERENCE=False)")
+
+
+if __name__ == "__main__":
+    main()
