@@ -1,0 +1,51 @@
+Loading system/intel64
+  Loading requirement: services/slurm
+Currently Loaded Modulefiles: 1) services/slurm <aL> 2) system/intel64(default) 3) anaconda3/2024.02 Key: (symbolic-version) <module-tag> <aL>=auto-loaded
+[STEP] Run joint HMC
+[INFO] Precision mode: FP64
+[STEP] Generate all probe datasets
+[STEP] Build DSPL clean/noisy datasets
+[STEP] Catalog zs2<=zs1 count: 0/1434 (no pre-filter)
+[STEP] Use 500 DSPL systems; source2 photo-z count=300 (60.00%)
+[STEP] Build lens+kinematic clean/noisy datasets
+[STEP] Build SNe clean/noisy datasets
+[STEP] Build quasar clean/noisy datasets
+[STEP] Apply per-probe sample limits
+[STEP] Execute clean joint run
+[STEP] Run joint MCMC (clean)
+[clean] divergences: 0
+[STEP] Skip noisy joint inference (RUN_NOISY_INFERENCE=False)
+[STEP] Run lens+kinematic HMC
+[INFO] Precision mode: FP64
+[STEP] Load lensing lookup table and Euclid lens catalog
+[STEP] Build clean/noisy mock lens+kinematic observables
+[STEP] Execute clean run
+[STEP] Run MCMC for lens+kin (clean)
+[clean] divergences: 7
+[STEP] Skip noisy inference (RUN_NOISY_INFERENCE=False)
+[STEP] Run DSPL HMC
+[INFO] Precision mode: FP64
+[STEP] Load DSPL catalog and derive geometric quantities
+[STEP] Catalog zs2<=zs1 count: 0/1434 (no pre-filter)
+[STEP] Use 500 DSPL systems; source2 photo-z count=300 (60.00%)
+[STEP] Build clean/noisy mock DSPL observables
+[STEP] Execute clean run
+[STEP] Run MCMC for DSPL (clean)
+[clean] divergences: 0
+[STEP] Skip noisy inference (RUN_NOISY_INFERENCE=False)
+[STEP] Run lensed SNe HMC
+[INFO] Precision mode: FP64
+[STEP] Load SNe catalog and distance-delay geometry
+[STEP] Build clean/noisy mock SNe observables
+[STEP] Execute clean run
+[STEP] Run MCMC for SNe (clean)
+[clean] divergences: 0
+[STEP] Skip noisy inference (RUN_NOISY_INFERENCE=False)
+[STEP] Run lensed quasar HMC
+[INFO] Precision mode: FP64
+[STEP] Load quasar block data and build time-delay base vectors
+[STEP] Build clean/noisy mock quasar observables
+[STEP] Execute clean run
+[STEP] Run MCMC for quasar (clean)
+[clean] divergences: 0
+[STEP] Skip noisy inference (RUN_NOISY_INFERENCE=False)

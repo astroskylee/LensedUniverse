@@ -18,12 +18,10 @@ class tool:
 
     @staticmethod
     def func(z, Omegam, Omegak, w0, wa=0):
-        # Normalized Hubble parameter E(z) using the standard CPL dark-energy evolution.
-        Omegal = 1.0 - Omegam - Omegak
-        zp1 = 1.0 + z
-        de = zp1 ** (3.0 * (1.0 + w0 + wa)) * jnp.exp(-3.0 * wa * z / zp1)
-        Ez2 = Omegam * zp1 ** 3 + Omegak * zp1 ** 2 + Omegal * de
-        return Ez2 ** -0.5
+        # Normalized Hubble parameter E(z)
+        Omegal = 1 - Omegam - Omegak
+        w_z = w0 + wa * z / (1 + z)
+        return (Omegam * (1 + z) ** 3 + Omegak * (1 + z) ** 2 + Omegal * (1 + z) ** (3 * (1 + w_z))) ** -0.5
 
     @staticmethod
     def nth_order_quad(n=20):

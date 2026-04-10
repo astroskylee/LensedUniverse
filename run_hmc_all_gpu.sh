@@ -10,7 +10,7 @@
 #SBATCH --mail-user=tian.li@port.ac.uk
 #SBATCH --mail-type=ALL
 #SBATCH --partition=gpu.q
-#SBATCH --exclude gpu0[1]
+#SBATCH --exclude gpu0[1,2]
 
 module load system
 module load anaconda3/2024.02
@@ -20,7 +20,7 @@ source /mnt/lustre2/shared_conda/envs/tianli/herculens_tian/bin/activate
 cd /users/tianli/LensedUniverse
 
 export SLCOSMO_USE_X64=1
-export SLCOSMO_RUN_NOISY=0
+export SLCOSMO_RUN_NOISY=1
 
 echo "[STEP] Run joint HMC"
 python -u hmc_scripts/run_joint_hmc.py
