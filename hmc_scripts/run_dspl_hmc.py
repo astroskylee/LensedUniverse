@@ -58,7 +58,6 @@ cosmo_prior = {
     "omegam_up": 0.5, "omegam_low": 0.1,
 }
 DSPL_TARGET = 500
-PHOTO_FRAC_ZS2 = 0.60
 
 step("Load DSPL catalog and derive geometric quantities")
 data_dspl = np.loadtxt(DATA_DIR / "EuclidDSPLs_1.txt")
@@ -86,27 +85,7 @@ if N_all > DSPL_TARGET:
     model_vel_dspl = model_vel_dspl[select_idx]
 N_dspl = len(zl_dspl)
 
-n_photo = int(round(PHOTO_FRAC_ZS2 * N_dspl))
-n_photo = max(0, min(n_photo, N_dspl))
-is_photo = np.zeros(N_dspl, dtype=bool)
-if n_photo > 0:
-    photo_idx = rng_np.choice(N_dspl, size=n_photo, replace=False)
-    is_photo[photo_idx] = True
-step(
-    f"Use {N_dspl} DSPL systems; source2 photo-z count={int(is_photo.sum())} "
-    f"({float(is_photo.mean()):.2%})"
-)
-zs2_err = np.where(is_photo, 0.1, 1e-4)
-zs2_obs = zs2_true_cat + rng_np.normal(0.0, zs2_err)
-
-eps = 1e-3
-bad = zs2_obs <= (zs1_dspl + eps)
-for _ in range(20):
-    if not np.any(bad):
-        break
-    zs2_obs[bad] = zs2_true_cat[bad] + rng_np.normal(0.0, zs2_err[bad])
-    bad = zs2_obs <= (zs1_dspl + eps)
-zs2_obs = np.maximum(zs2_obs, zs1_dspl + eps)
+step(f"Use {N_dspl} DSPL systems; all source2 redshifts are treated as precise")
 
 Dl1, Ds1, Dls1 = tool.compute_distances(zl_dspl, zs1_dspl, cosmo_true)
 Dl2, Ds2, Dls2 = tool.compute_distances(zl_dspl, zs2_true_cat, cosmo_true)
@@ -123,22 +102,17 @@ beta_true = tool.beta_antimst(beta_geom_dspl, mst=lambda_true)
 
 lambda_obs_clean = lambda_true
 beta_obs_clean = beta_true
-zs2_use_clean = zs2_true_cat
 
 lambda_obs_noisy = lambda_true + rng_np.normal(0.0, lambda_err)
 beta_obs_noisy = tool.truncated_normal(beta_true, beta_err_dspl, 0.0, 1.0, random_state=rng_np)
-zs2_use_noisy = zs2_obs
 
 
-def build_data(lambda_obs, beta_obs, zs2_use):
-    spec_mask = ~is_photo
+def build_data(lambda_obs, beta_obs):
     return {
         "zl": zl_dspl,
         "zs1": zs1_dspl,
         "zs2_cat": zs2_true_cat,
-        "zs2_obs": zs2_use,
-        "zs2_err": zs2_err,
-        "is_photo": is_photo.astype(np.int32),
+        "zs2_obs": zs2_true_cat,
         "beta_obs": beta_obs,
         "beta_err": beta_err_dspl,
         "v_model": model_vel_dspl,
@@ -146,26 +120,11 @@ def build_data(lambda_obs, beta_obs, zs2_use):
         "v_err": vel_err,
         "lambda_err": lambda_err,
         "lambda_obs": lambda_obs,
-        "zl_photo": zl_dspl[is_photo],
-        "zs1_photo": zs1_dspl[is_photo],
-        "zs2_obs_photo": zs2_use[is_photo],
-        "zs2_err_photo": zs2_err[is_photo],
-        "beta_obs_photo": beta_obs[is_photo],
-        "beta_err_photo": beta_err_dspl[is_photo],
-        "lambda_obs_photo": lambda_obs[is_photo],
-        "lambda_err_photo": lambda_err[is_photo],
-        "zl_spec": zl_dspl[spec_mask],
-        "zs1_spec": zs1_dspl[spec_mask],
-        "zs2_obs_spec": zs2_use[spec_mask],
-        "beta_obs_spec": beta_obs[spec_mask],
-        "beta_err_spec": beta_err_dspl[spec_mask],
-        "lambda_obs_spec": lambda_obs[spec_mask],
-        "lambda_err_spec": lambda_err[spec_mask],
     }
 
 
-dspl_data_clean = build_data(lambda_obs_clean, beta_obs_clean, zs2_use_clean)
-dspl_data_noisy = build_data(lambda_obs_noisy, beta_obs_noisy, zs2_use_noisy)
+dspl_data_clean = build_data(lambda_obs_clean, beta_obs_clean)
+dspl_data_noisy = build_data(lambda_obs_noisy, beta_obs_noisy)
 
 
 def cosmology_model(kind, cosmo_prior, sample_h0=True):
@@ -193,53 +152,23 @@ def dspl_model(dspl_data):
     lambda_mean = numpyro.sample("lambda_mean", dist.Uniform(0.9, 1.1))
     lambda_sigma = numpyro.sample("lambda_sigma", dist.TruncatedNormal(0.05, 0.5, low=0.0, high=0.2))
 
-    n_photo = int(np.asarray(dspl_data["zl_photo"]).shape[0])
-    n_spec = int(np.asarray(dspl_data["zl_spec"]).shape[0])
-    eps = 1e-3
+    zl = jnp.asarray(dspl_data["zl"])
+    zs1 = jnp.asarray(dspl_data["zs1"])
+    zs2 = jnp.asarray(dspl_data["zs2_obs"])
 
-    if n_photo > 0:
-        zl_photo = jnp.asarray(dspl_data["zl_photo"])
-        zs1_photo = jnp.asarray(dspl_data["zs1_photo"])
-        zs2_obs_photo = jnp.asarray(dspl_data["zs2_obs_photo"])
-        zs2_err_photo = jnp.asarray(dspl_data["zs2_err_photo"])
+    Dl1, Ds1, Dls1 = tool.compute_distances(zl, zs1, cosmo)
+    Dl2, Ds2, Dls2 = tool.compute_distances(zl, zs2, cosmo)
+    beta_geom = Dls1 * Ds2 / (Ds1 * Dls2)
 
-        Dl1_photo, Ds1_photo, Dls1_photo = tool.compute_distances(zl_photo, zs1_photo, cosmo)
-        # Sample latent source redshifts only for photo-z systems; treating near-spec-z points as latent can stall NUTS at high target_accept.
-        zs2_true_photo = numpyro.sample(
-            "zs2_true_photo",
-            dist.TruncatedNormal(zs2_obs_photo, zs2_err_photo, low=zs1_photo + eps, high=10.0).to_event(1),
+    with numpyro.plate("dspl", len(zl)):
+        lambda_dspl = numpyro.sample("lambda_dspl", dist.TruncatedNormal(lambda_mean, lambda_sigma, low=0.5, high=1.5))
+        numpyro.sample("lambda_dspl_like", dist.Normal(lambda_dspl, dspl_data["lambda_err"]), obs=dspl_data["lambda_obs"])
+        beta_mst = tool.beta_antimst(beta_geom, lambda_dspl)
+        numpyro.sample(
+            "beta_dspl_like",
+            dist.TruncatedNormal(beta_mst, dspl_data["beta_err"], low=0.0, high=1.0),
+            obs=dspl_data["beta_obs"],
         )
-        Dl2_photo, Ds2_photo, Dls2_photo = tool.compute_distances(zl_photo, zs2_true_photo, cosmo)
-        beta_geom_photo = Dls1_photo * Ds2_photo / (Ds1_photo * Dls2_photo)
-
-        with numpyro.plate("dspl_photo", n_photo):
-            lambda_photo = numpyro.sample("lambda_dspl_photo", dist.TruncatedNormal(lambda_mean, lambda_sigma, low=0.5, high=1.5))
-            numpyro.sample("lambda_dspl_photo_like", dist.Normal(lambda_photo, dspl_data["lambda_err_photo"]), obs=dspl_data["lambda_obs_photo"])
-            beta_mst_photo = tool.beta_antimst(beta_geom_photo, lambda_photo)
-            numpyro.sample(
-                "beta_dspl_photo_like",
-                dist.TruncatedNormal(beta_mst_photo, dspl_data["beta_err_photo"], low=0.0, high=1.0),
-                obs=dspl_data["beta_obs_photo"],
-            )
-
-    if n_spec > 0:
-        zl_spec = jnp.asarray(dspl_data["zl_spec"])
-        zs1_spec = jnp.asarray(dspl_data["zs1_spec"])
-        zs2_spec = jnp.asarray(dspl_data["zs2_obs_spec"])
-
-        Dl1_spec, Ds1_spec, Dls1_spec = tool.compute_distances(zl_spec, zs1_spec, cosmo)
-        Dl2_spec, Ds2_spec, Dls2_spec = tool.compute_distances(zl_spec, zs2_spec, cosmo)
-        beta_geom_spec = Dls1_spec * Ds2_spec / (Ds1_spec * Dls2_spec)
-
-        with numpyro.plate("dspl_spec", n_spec):
-            lambda_spec = numpyro.sample("lambda_dspl_spec", dist.TruncatedNormal(lambda_mean, lambda_sigma, low=0.5, high=1.5))
-            numpyro.sample("lambda_dspl_spec_like", dist.Normal(lambda_spec, dspl_data["lambda_err_spec"]), obs=dspl_data["lambda_obs_spec"])
-            beta_mst_spec = tool.beta_antimst(beta_geom_spec, lambda_spec)
-            numpyro.sample(
-                "beta_dspl_spec_like",
-                dist.TruncatedNormal(beta_mst_spec, dspl_data["beta_err_spec"], low=0.0, high=1.0),
-                obs=dspl_data["beta_obs_spec"],
-            )
 
 
 def build_init_values(dspl_data):
@@ -251,21 +180,9 @@ def build_init_values(dspl_data):
         "lambda_mean": jnp.asarray(1.0),
         "lambda_sigma": jnp.asarray(0.08),
     }
-    n_photo = int(np.asarray(dspl_data["zl_photo"]).shape[0])
-    n_spec = int(np.asarray(dspl_data["zl_spec"]).shape[0])
-    if n_photo > 0:
-        zs2_true_photo = np.asarray(dspl_data["zs2_obs_photo"], dtype=np.float64)
-        zs1_photo = np.asarray(dspl_data["zs1_photo"], dtype=np.float64)
-        zs2_true_photo = np.maximum(zs2_true_photo, zs1_photo + 1e-3)
-        zs2_true_photo = np.clip(zs2_true_photo, zs1_photo + 1e-3, 9.999)
-        lambda_photo = np.asarray(dspl_data["lambda_obs_photo"], dtype=np.float64)
-        lambda_photo = np.clip(lambda_photo, 0.801, 1.199)
-        init_values["zs2_true_photo"] = jnp.asarray(zs2_true_photo)
-        init_values["lambda_dspl_photo"] = jnp.asarray(lambda_photo)
-    if n_spec > 0:
-        lambda_spec = np.asarray(dspl_data["lambda_obs_spec"], dtype=np.float64)
-        lambda_spec = np.clip(lambda_spec, 0.801, 1.199)
-        init_values["lambda_dspl_spec"] = jnp.asarray(lambda_spec)
+    lambda_dspl = np.asarray(dspl_data["lambda_obs"], dtype=np.float64)
+    lambda_dspl = np.clip(lambda_dspl, 0.801, 1.199)
+    init_values["lambda_dspl"] = jnp.asarray(lambda_dspl)
     return init_values
 
 

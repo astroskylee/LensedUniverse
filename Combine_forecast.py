@@ -81,7 +81,7 @@ cosmo_prior = {
 # mock “true” cosmology for data generation
 cosmo_true = {"Omegam": 0.32, "Omegak": 0.0, "w0": -1.0, "wa": 0.0, "h0": 70.0}
 
-# %% 1) DSPL mock data (β + σ_v)  + 60% photo-z on zs2
+# %% 1) DSPL mock data (β + σ_v), with precise source2 redshifts
 data_dspl = np.loadtxt(os.path.join(DATA_DIR, "EuclidDSPLs_1.txt"))
 data_dspl = data_dspl[(data_dspl[:, 5] < 0.95)]
 
@@ -102,21 +102,6 @@ model_vel_dspl = model_vel_dspl[m_ok]
 N_dspl = len(zl_dspl)
 print("N_dspl after zs2>zs1 cut =", N_dspl)
 
-# --- 60% systems use photo-z on zs2 with sigma=0.1
-is_photo = (rng_np.random(N_dspl) < 0.60)
-zs2_err = np.where(is_photo, 0.1, 1e-4)
-zs2_obs = zs2_true_cat + rng_np.normal(0.0, zs2_err)
-
-# --- enforce zs2_obs > zs1
-eps = 1e-3
-bad = zs2_obs <= (zs1_dspl + eps)
-for _ in range(20):
-    if not np.any(bad):
-        break
-    zs2_obs[bad] = zs2_true_cat[bad] + rng_np.normal(0.0, zs2_err[bad])
-    bad = zs2_obs <= (zs1_dspl + eps)
-zs2_obs = np.maximum(zs2_obs, zs1_dspl + eps)
-
 Dl1, Ds1, Dls1 = tool.compute_distances(zl_dspl, zs1_dspl, cosmo_true)
 Dl2, Ds2, Dls2 = tool.compute_distances(zl_dspl, zs2_true_cat, cosmo_true)
 beta_geom_dspl = Dls1 * Ds2 / (Ds1 * Dls2)
@@ -133,20 +118,16 @@ if USE_NOISY_DSPL:
     lambda_obs_dspl = lambda_true_dspl + np.random.normal(0.0, lambda_err_dspl)
     obs_vel_dspl = true_vel_dspl + np.random.normal(0.0, vel_err_dspl)
     beta_obs_dspl = tool.truncated_normal(beta_true_dspl, beta_err_dspl, 0.0, 1.0, random_state=rng_np)
-    zs2_use = zs2_obs
 else:
     lambda_obs_dspl = lambda_true_dspl
     obs_vel_dspl = true_vel_dspl
     beta_obs_dspl = beta_true_dspl
-    zs2_use = zs2_true_cat
 
 dspl_data = {
     "zl": zl_dspl,
     "zs1": zs1_dspl,
     "zs2_cat": zs2_true_cat,
-    "zs2_obs": zs2_use,
-    "zs2_err": zs2_err,
-    "is_photo": is_photo.astype(np.int32),
+    "zs2_obs": zs2_true_cat,
     "beta_obs": beta_obs_dspl,
     "beta_err": beta_err_dspl,
     "v_model": model_vel_dspl,
@@ -156,7 +137,6 @@ dspl_data = {
     "lambda_obs": lambda_obs_dspl,
 }
 
-photo_z = True
 # %% 2) Lens+kin mock data (E, γ, β_aniso, σ_v)
 LUT = np.load(os.path.join(DATA_DIR, "velocity_disp_table.npy"))
 N1, N2, N3, N4 = LUT.shape
@@ -397,46 +377,32 @@ quasar_data = {
 def joint_model(dspl_data = None, lens_data = None, sne_data = None, quasar_data = None):
     # shared cosmology
     cosmo = cosmology_model("waw0cdm", cosmo_prior, sample_h0=True)
-    # shared MST population
-    lambda_mean = numpyro.sample("lambda_mean", dist.Uniform(0.9, 1.1))
-    lambda_sigma = numpyro.sample("lambda_sigma", dist.TruncatedNormal(0.05, 0.5, low=0.0, high=0.2))
 
     # lens slope & anisotropy population (only used in lens+kin block)
-    gamma_mean = numpyro.sample("gamma_mean", dist.Uniform(1.8, 2.2))
-    gamma_sigma = numpyro.sample("gamma_sigma", dist.TruncatedNormal(0.2, 0.5, low=0.0, high=0.4))
-    beta_mean  = numpyro.sample("beta_mean", dist.Uniform(-0.1, 0.1))
-    beta_sigma = numpyro.sample("beta_sigma", dist.TruncatedNormal(0.2, 0.5, low=0.0, high=0.4))
+    gamma_mean = numpyro.sample("gamma_mean", dist.Uniform(1.4, 2.6))
+    gamma_sigma = numpyro.sample("gamma_sigma", dist.TruncatedNormal(0.2, 0.2, low=0.0, high=0.4))
+    beta_mean  = numpyro.sample("beta_mean", dist.Uniform(-0.3, 0.3))
+    beta_sigma = numpyro.sample("beta_sigma", dist.TruncatedNormal(0.2, 0.2, low=0.0, high=0.4))
 
     # ----- DSPL block -----
     if dspl_data is not None:
+        lambda_mean_dspl = numpyro.sample("lambda_mean_dspl", dist.Uniform(0.9, 1.1))
+        lambda_sigma_dspl = numpyro.sample("lambda_sigma_dspl", dist.TruncatedNormal(0.05, 0.5, low=0.0, high=0.2))
         N_dspl = len(dspl_data["zl"])
     
         zl  = jnp.asarray(dspl_data["zl"])
         zs1 = jnp.asarray(dspl_data["zs1"])
-        zs2_obs = jnp.asarray(dspl_data["zs2_obs"])
-        zs2_err = jnp.asarray(dspl_data["zs2_err"])
+        zs2 = jnp.asarray(dspl_data["zs2_obs"])
     
         # zs1 distances（确定量）
         Dl1, Ds1, Dls1 = tool.compute_distances(zl, zs1, cosmo)
-    
-        # 关键：采样每个系统的 zs2_true（向量化，一次 sample）
-        if photo_z:
-            eps = 1e-3
-            zs2_true = numpyro.sample(
-                "zs2_true",
-                dist.TruncatedNormal(zs2_obs, zs2_err, low=zs1 + eps, high=10.0).to_event(1)
-            )
-        
-            # 用采样出来的 zs2_true 计算距离与 beta
-        else:
-            zs2_true = dspl_data['zs2_cat']
-        Dl2, Ds2, Dls2 = tool.compute_distances(zl, zs2_true, cosmo)
+        Dl2, Ds2, Dls2 = tool.compute_distances(zl, zs2, cosmo)
         beta_geom = Dls1 * Ds2 / (Ds1 * Dls2)
     
         with numpyro.plate("dspl", N_dspl):
             lambda_dspl = numpyro.sample(
                 "lambda_dspl",
-                dist.TruncatedNormal(lambda_mean, lambda_sigma, low=0.8, high=1.2),
+                dist.TruncatedNormal(lambda_mean_dspl, lambda_sigma_dspl, low=0.5, high=1.5),
             )
     
             numpyro.sample("lambda_dspl_like",
@@ -451,6 +417,8 @@ def joint_model(dspl_data = None, lens_data = None, sne_data = None, quasar_data
 
     # ----- lens+kin block -----
     if lens_data is not None:
+        lambda_mean_lens = numpyro.sample("lambda_mean_lens", dist.Uniform(0.9, 1.1))
+        lambda_sigma_lens = numpyro.sample("lambda_sigma_lens", dist.TruncatedNormal(0.05, 0.5, low=0.0, high=0.2))
         # lens+kin distances
         dl_lens, ds_lens, dls_lens = tool.dldsdls(lens_data["zl"], lens_data["zs"], cosmo, n=20)
         N_lens = len(lens_data["zl"])
@@ -465,7 +433,7 @@ def joint_model(dspl_data = None, lens_data = None, sne_data = None, quasar_data
             )
             lambda_lens = numpyro.sample(
                 "lambda_lens",
-                dist.TruncatedNormal(lambda_mean, lambda_sigma, low=0.8, high=1.2),
+                dist.TruncatedNormal(lambda_mean_lens, lambda_sigma_lens, low=0.8, high=1.2),
             )
             theta_E_i = numpyro.sample(
                 "theta_E_i",
@@ -482,6 +450,8 @@ def joint_model(dspl_data = None, lens_data = None, sne_data = None, quasar_data
                            obs=lens_data["vel_obs"])
 
     if sne_data is not None:
+        lambda_mean_sne = numpyro.sample("lambda_mean_sne", dist.Uniform(0.9, 1.1))
+        lambda_sigma_sne = numpyro.sample("lambda_sigma_sne", dist.TruncatedNormal(0.05, 0.5, low=0.0, high=0.2))
         # SNe distances
         Dl_sne, Ds_sne, Dls_sne = tool.dldsdls(sne_data["zl"], sne_data["zs"], cosmo, n=20)
         Ddt_geom = (1.0 + sne_data["zl"]) * Dl_sne * Ds_sne / Dls_sne
@@ -496,7 +466,7 @@ def joint_model(dspl_data = None, lens_data = None, sne_data = None, quasar_data
 
         with numpyro.plate("sne", N_sne):
             phi_true_scaled = numpyro.sample("phi_true_scaled_sne", dist.TruncatedNormal(phi_obs, sigma_phi, low=0.0, high=10.0))
-            lambda_sne = numpyro.sample("lambda_sne", dist.TruncatedNormal(lambda_mean, lambda_sigma, low=0.8, high=1.2))
+            lambda_sne = numpyro.sample("lambda_sne", dist.TruncatedNormal(lambda_mean_sne, lambda_sigma_sne, low=0.8, high=1.2))
             numpyro.sample(
                 "lambda_sne_like",
                 dist.Normal(lambda_sne, lambda_err),
@@ -514,6 +484,8 @@ def joint_model(dspl_data = None, lens_data = None, sne_data = None, quasar_data
 
 
     if quasar_data is not None:
+        lambda_mean_quasar = numpyro.sample("lambda_mean_quasar", dist.Uniform(0.9, 1.1))
+        lambda_sigma_quasar = numpyro.sample("lambda_sigma_quasar", dist.TruncatedNormal(0.05, 0.5, low=0.0, high=0.2))
         Dl_q, Ds_q, Dls_q = tool.dldsdls(quasar_data["zl"], quasar_data["zs"], cosmo, n=20)
         Ddt_geom_q = (1.0 + quasar_data["zl"]) * Dl_q * Ds_q / Dls_q
         N_q = len(quasar_data["zl"])
@@ -529,7 +501,7 @@ def joint_model(dspl_data = None, lens_data = None, sne_data = None, quasar_data
 
         with numpyro.plate("quasar", N_q):
             phi_true_scaled = numpyro.sample("phi_true_scaled_q", dist.Normal(phi_obs, phi_err))
-            lambda_q = numpyro.sample("lambda_q", dist.TruncatedNormal(lambda_mean, lambda_sigma, low=0.8, high=1.2))
+            lambda_q = numpyro.sample("lambda_q", dist.TruncatedNormal(lambda_mean_quasar, lambda_sigma_quasar, low=0.8, high=1.2))
             numpyro.sample("lambda_q_like", dist.Normal(lambda_q, lambda_err).mask(mst_mask), obs=lambda_obs)
 
             phi_true = phi_true_scaled / phi_scale
@@ -578,8 +550,14 @@ init_values = {
     "Omegam": 0.32,
     "w0": -1.0,
     "wa": 0.0,
-    "lambda_mean": 1.0,
-    "lambda_sigma": 0.05,
+    "lambda_mean_dspl": 1.0,
+    "lambda_sigma_dspl": 0.08,
+    "lambda_mean_lens": 1.0,
+    "lambda_sigma_lens": 0.08,
+    "lambda_mean_sne": 1.0,
+    "lambda_sigma_sne": 0.08,
+    "lambda_mean_quasar": 1.0,
+    "lambda_sigma_quasar": 0.08,
     # 也可以给 hyper-sigma、gamma_mean 等加上
     "gamma_mean": 2.0,
     "gamma_sigma": 0.2,
@@ -589,7 +567,7 @@ init_values = {
 from numpyro.infer import init_to_value, init_to_median
 init_strategy = init_to_value(values=init_values)
 
-nuts_kernel = NUTS(joint_model, target_accept_prob=0.95, dense_mass=[('wa', 'w0', 'h0', 'Omegam', 'lambda_mean')], init_strategy=init_strategy)
+nuts_kernel = NUTS(joint_model, target_accept_prob=0.95, init_strategy=init_strategy)
 mcmc = MCMC(
     nuts_kernel,
     num_warmup=num_warmup,
@@ -604,12 +582,15 @@ corner_vars = [
     "h0", "Omegam", "w0", "wa",
     "gamma_mean", "gamma_sigma",
     "beta_mean", "beta_sigma",
-    "lambda_mean", "lambda_sigma",
+    "lambda_mean_dspl", "lambda_sigma_dspl",
+    "lambda_mean_lens", "lambda_sigma_lens",
+    "lambda_mean_sne", "lambda_sigma_sne",
+    "lambda_mean_quasar", "lambda_sigma_quasar",
 ]
 import corner
-truths = [70, 0.32, -1.0, 0.0, 2.0, 0.2, 0.0, 0.2, 1.0, 0.05]
+truths = [70, 0.32, -1.0, 0.0, 2.0, 0.2, 0.0, 0.2, 1.0, 0.08, 1.0, 0.08, 1.0, 0.08, 1.0, 0.08]
 
-mcmc.run(rng_key,dspl_data=dspl_data, sne_data = sne_data, lens_data = lens_data) 
+mcmc.run(rng_key, dspl_data=dspl_data, sne_data=sne_data, lens_data=lens_data, quasar_data=quasar_data)
 
 posterior = jax.device_get(mcmc.get_samples(group_by_chain=True))
 sample_stats = jax.device_get(mcmc.get_extra_fields(group_by_chain=True))
