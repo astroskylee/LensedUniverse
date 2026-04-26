@@ -19,7 +19,7 @@ from slcosmo import SLCOSMO, SLmodel, tool
 
 TEST_MODE = False
 DATA_DIR = os.environ.get("SLCOSMO_DATA_DIR", os.path.join("..", "slcosmo"))
-OTHER_FORECAST_DIR = os.environ.get("OTHER_FORECAST_DIR", os.path.join("..", "SLCOSMO", "other_forecast"))
+OTHER_FORECAST_DIR = os.environ.get("OTHER_FORECAST_DIR", os.path.join("data", "other_forecast"))
 
 USE_X64 = os.environ.get("SLCOSMO_USE_X64", "0").strip().lower() in {"1", "true", "yes", "y", "on"}
 jax.config.update("jax_enable_x64", USE_X64)
