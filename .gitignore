@@ -9,6 +9,3 @@ result/*.nc
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
-
-# Local forecast comparison data
-data/other_forecast/*.txt
