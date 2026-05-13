@@ -58,6 +58,7 @@ cosmo_prior = {
     "omegam_up": 0.5, "omegam_low": 0.1,
 }
 DSPL_TARGET = 500
+SIGMA_ETA_LOS_FRAC = 0.01
 
 step("Load DSPL catalog and derive geometric quantities")
 data_dspl = np.loadtxt(DATA_DIR / "EuclidDSPLs_1.txt")
@@ -104,7 +105,8 @@ lambda_obs_clean = lambda_true
 beta_obs_clean = beta_true
 
 lambda_obs_noisy = lambda_true + rng_np.normal(0.0, lambda_err)
-beta_obs_noisy = tool.truncated_normal(beta_true, beta_err_dspl, 0.0, 1.0, random_state=rng_np)
+beta_err_tot_dspl = np.sqrt(beta_err_dspl**2 + (SIGMA_ETA_LOS_FRAC * np.asarray(beta_true))**2)
+beta_obs_noisy = tool.truncated_normal(beta_true, beta_err_tot_dspl, 0.0, 1.0, random_state=rng_np)
 
 
 def build_data(lambda_obs, beta_obs):
@@ -164,9 +166,10 @@ def dspl_model(dspl_data):
         lambda_dspl = numpyro.sample("lambda_dspl", dist.TruncatedNormal(lambda_mean, lambda_sigma, low=0.5, high=1.5))
         numpyro.sample("lambda_dspl_like", dist.Normal(lambda_dspl, dspl_data["lambda_err"]), obs=dspl_data["lambda_obs"])
         beta_mst = tool.beta_antimst(beta_geom, lambda_dspl)
+        beta_err_tot = jnp.sqrt(jnp.asarray(dspl_data["beta_err"])**2 + (SIGMA_ETA_LOS_FRAC * beta_mst)**2)
         numpyro.sample(
             "beta_dspl_like",
-            dist.TruncatedNormal(beta_mst, dspl_data["beta_err"], low=0.0, high=1.0),
+            dist.TruncatedNormal(beta_mst, beta_err_tot, low=0.0, high=1.0),
             obs=dspl_data["beta_obs"],
         )
 
@@ -195,7 +198,7 @@ def run_mcmc(data, key, tag):
 
     nuts = NUTS(
         dspl_model,
-        target_accept_prob=0.99,
+        target_accept_prob=0.9,
         init_strategy=init_to_value(values=build_init_values(data)),
     )
     mcmc = MCMC(

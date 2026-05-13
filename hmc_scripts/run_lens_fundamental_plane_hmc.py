@@ -62,6 +62,9 @@ cosmo_prior = {
 }
 Z_SIGMA_CLIP = 2.0
 VEL_FRAC_ERR_MAX = 0.30
+KAPPA_EXT_MEAN_TRUE = 0.0
+KAPPA_EXT_SCATTER_TRUE = 0.05
+SIGMA_KAPPA_EXT = 0.03
 
 step("Load lookup table and fundamental-plane catalog")
 LUT = np.load(DATA_DIR / "velocity_disp_table.npy")
@@ -129,8 +132,11 @@ step("Build clean/noisy mock fundamental-plane observables")
 gamma_true_fp = tool.truncated_normal(2.0, 0.2, 1.5, 2.5, zl_fp.size, random_state=rng_np)
 beta_true_fp = tool.truncated_normal(0.0, 0.2, -0.4, 0.4, zl_fp.size, random_state=rng_np)
 lambda_true_fp = tool.truncated_normal(1.0, 0.05, 0.8, 1.2, zl_fp.size, random_state=rng_np)
+kappa_ext_true_fp = tool.truncated_normal(
+    KAPPA_EXT_MEAN_TRUE, KAPPA_EXT_SCATTER_TRUE, -0.2, 0.3, zl_fp.size, random_state=rng_np
+)
 vel_model_fp = jampy_interp(thetaE_true_fp, gamma_true_fp, re_fp, beta_true_fp) * jnp.sqrt(ds_fp_true / dls_fp_true)
-vel_true_fp = np.asarray(vel_model_fp) * np.sqrt(lambda_true_fp)
+vel_true_fp = np.asarray(vel_model_fp) * np.sqrt(lambda_true_fp * (1.0 - kappa_ext_true_fp))
 vel_err_fp = vel_frac_err_template * np.abs(vel_true_fp)
 
 clean_keep_mask = vel_true_fp <= 400.0
@@ -145,6 +151,7 @@ re_fp = re_fp[clean_keep_mask]
 gamma_true_fp = gamma_true_fp[clean_keep_mask]
 beta_true_fp = beta_true_fp[clean_keep_mask]
 lambda_true_fp = lambda_true_fp[clean_keep_mask]
+kappa_ext_true_fp = kappa_ext_true_fp[clean_keep_mask]
 vel_true_fp = vel_true_fp[clean_keep_mask]
 vel_err_fp = vel_err_fp[clean_keep_mask]
 
@@ -172,6 +179,7 @@ re_fp = re_fp[noisy_keep_mask]
 gamma_true_fp = gamma_true_fp[noisy_keep_mask]
 beta_true_fp = beta_true_fp[noisy_keep_mask]
 lambda_true_fp = lambda_true_fp[noisy_keep_mask]
+kappa_ext_true_fp = kappa_ext_true_fp[noisy_keep_mask]
 vel_err_fp = vel_err_fp[noisy_keep_mask]
 thetaE_obs_clean_fp = thetaE_obs_clean_fp[noisy_keep_mask]
 vel_obs_clean_fp = vel_obs_clean_fp[noisy_keep_mask]
@@ -205,6 +213,7 @@ re_fp = re_fp[z_prior_mask]
 gamma_true_fp = gamma_true_fp[z_prior_mask]
 beta_true_fp = beta_true_fp[z_prior_mask]
 lambda_true_fp = lambda_true_fp[z_prior_mask]
+kappa_ext_true_fp = kappa_ext_true_fp[z_prior_mask]
 vel_err_fp = vel_err_fp[z_prior_mask]
 thetaE_obs_clean_fp = thetaE_obs_clean_fp[z_prior_mask]
 vel_obs_clean_fp = vel_obs_clean_fp[z_prior_mask]
@@ -261,6 +270,7 @@ if n_use < n_after_filter:
     gamma_true_fp = gamma_true_fp[select_idx]
     beta_true_fp = beta_true_fp[select_idx]
     lambda_true_fp = lambda_true_fp[select_idx]
+    kappa_ext_true_fp = kappa_ext_true_fp[select_idx]
     vel_err_fp = vel_err_fp[select_idx]
     thetaE_obs_clean_fp = thetaE_obs_clean_fp[select_idx]
     vel_obs_clean_fp = vel_obs_clean_fp[select_idx]
@@ -276,9 +286,12 @@ gamma_err_fp = np.full(zl_fp.size, 0.2)
 gamma_has_obs = np.ones(zl_fp.size, dtype=bool)
 gamma_obs_clean_fp = gamma_true_fp.copy()
 gamma_obs_noisy_fp = gamma_true_fp + rng_np.normal(0.0, gamma_err_fp)
+kappa_ext_err_fp = np.full(zl_fp.size, SIGMA_KAPPA_EXT)
+kappa_ext_obs_clean_fp = kappa_ext_true_fp.copy()
+kappa_ext_obs_noisy_fp = kappa_ext_true_fp + rng_np.normal(0.0, kappa_ext_err_fp)
 
 
-def build_data(zl_obs, zs_obs, theta_E_obs, vel_obs, gamma_obs):
+def build_data(zl_obs, zs_obs, theta_E_obs, vel_obs, gamma_obs, kappa_ext_obs):
     return {
         "zl": zl_obs,
         "zs": zs_obs,
@@ -302,11 +315,18 @@ def build_data(zl_obs, zs_obs, theta_E_obs, vel_obs, gamma_obs):
         "gamma_has_obs": gamma_has_obs,
         "beta_true": beta_true_fp,
         "lambda_true": lambda_true_fp,
+        "kappa_ext_true": kappa_ext_true_fp,
+        "kappa_ext_obs": kappa_ext_obs,
+        "kappa_ext_err": kappa_ext_err_fp,
     }
 
 
-fp_data_clean = build_data(zl_obs_clean_fp, zs_obs_clean_fp, thetaE_obs_clean_fp, vel_obs_clean_fp, gamma_obs_clean_fp)
-fp_data_noisy = build_data(zl_obs_noisy_fp, zs_obs_noisy_fp, thetaE_obs_noisy_fp, vel_obs_noisy_fp, gamma_obs_noisy_fp)
+fp_data_clean = build_data(
+    zl_obs_clean_fp, zs_obs_clean_fp, thetaE_obs_clean_fp, vel_obs_clean_fp, gamma_obs_clean_fp, kappa_ext_obs_clean_fp
+)
+fp_data_noisy = build_data(
+    zl_obs_noisy_fp, zs_obs_noisy_fp, thetaE_obs_noisy_fp, vel_obs_noisy_fp, gamma_obs_noisy_fp, kappa_ext_obs_noisy_fp
+)
 
 
 def cosmology_model(kind, cosmo_prior, sample_h0=True):
@@ -333,6 +353,8 @@ def fundamental_plane_model(fp_data):
 
     lambda_mean = numpyro.sample("lambda_mean", dist.Uniform(0.9, 1.1))
     lambda_sigma = numpyro.sample("lambda_sigma", dist.TruncatedNormal(0.05, 0.5, low=0.0, high=0.2))
+    kappa_mean = numpyro.sample("kappa_mean", dist.Uniform(-0.05, 0.05))
+    kappa_scatter = numpyro.sample("kappa_scatter", dist.Uniform(0.0, 0.1))
     gamma_mean = numpyro.sample("gamma_mean", dist.Uniform(1.4, 2.6))
     gamma_sigma = numpyro.sample("gamma_sigma", dist.TruncatedNormal(0.2, 0.2, low=0.0, high=0.4))
     beta_mean = numpyro.sample("beta_mean", dist.Uniform(-0.3, 0.3))
@@ -354,14 +376,24 @@ def fundamental_plane_model(fp_data):
         gamma_fp = numpyro.sample("gamma_fp", dist.TruncatedNormal(gamma_mean, gamma_sigma, low=1.4, high=2.6))
         beta_fp = numpyro.sample("beta_fp", dist.TruncatedNormal(beta_mean, beta_sigma, low=-0.4, high=0.4))
         lambda_fp = numpyro.sample("lambda_fp", dist.TruncatedNormal(lambda_mean, lambda_sigma, low=0.8, high=1.2))
+        kappa_ext_fp = numpyro.sample(
+            "kappa_ext_fp",
+            dist.TruncatedNormal(kappa_mean, kappa_scatter, low=-0.2, high=0.3),
+        )
         thetaE_fp = numpyro.sample("thetaE_fp", dist.Normal(fp_data["theta_E"], fp_data["theta_E_err"]))
 
         v_interp_fp = jampy_interp(thetaE_fp, gamma_fp, fp_data["re"], beta_fp)
-        vel_pred_fp = v_interp_fp * jnp.sqrt(ds_fp / dls_fp) * jnp.sqrt(lambda_fp)
+        lambda_eff_fp = lambda_fp * (1.0 - kappa_ext_fp)
+        vel_pred_fp = v_interp_fp * jnp.sqrt(ds_fp / dls_fp) * jnp.sqrt(lambda_eff_fp)
         numpyro.sample(
             "gamma_fp_like",
             dist.Normal(gamma_fp, fp_data["gamma_err"]),
             obs=fp_data["gamma_obs"],
+        )
+        numpyro.sample(
+            "kappa_ext_fp_like",
+            dist.Normal(kappa_ext_fp, fp_data["kappa_ext_err"]),
+            obs=fp_data["kappa_ext_obs"],
         )
         numpyro.sample(
             "vel_fp_like",
@@ -382,6 +414,7 @@ def build_init_values(fp_data):
     gamma_true = np.asarray(fp_data.get("gamma_true", fp_data["gamma_obs"]), dtype=np.float64)
     beta_true = np.asarray(fp_data.get("beta_true", np.zeros_like(theta_true)), dtype=np.float64)
     lambda_true = np.asarray(fp_data.get("lambda_true", np.ones_like(theta_true)), dtype=np.float64)
+    kappa_ext = np.asarray(fp_data.get("kappa_ext_true", fp_data["kappa_ext_obs"]), dtype=np.float64)
 
     zl_true = np.clip(zl_true, zL_low + 1e-6, zL_high - 1e-6)
     zs_true = np.clip(zs_true, zS_low + 1e-6, zS_high - 1e-6)
@@ -389,6 +422,7 @@ def build_init_values(fp_data):
     gamma_true = np.clip(gamma_true, 1.401, 2.599)
     beta_true = np.clip(beta_true, -0.399, 0.399)
     lambda_true = np.clip(lambda_true, 0.801, 1.199)
+    kappa_ext = np.clip(kappa_ext, -0.199, 0.299)
 
     return {
         "Omegam": jnp.asarray(cosmo_true["Omegam"]),
@@ -397,6 +431,8 @@ def build_init_values(fp_data):
         "h0": jnp.asarray(cosmo_true["h0"]),
         "lambda_mean": jnp.asarray(1.0),
         "lambda_sigma": jnp.asarray(0.08),
+        "kappa_mean": jnp.asarray(0.0),
+        "kappa_scatter": jnp.asarray(0.05),
         "gamma_mean": jnp.asarray(2.0),
         "gamma_sigma": jnp.asarray(0.25),
         "beta_mean": jnp.asarray(0.0),
@@ -406,6 +442,7 @@ def build_init_values(fp_data):
         "gamma_fp": jnp.asarray(gamma_true),
         "beta_fp": jnp.asarray(beta_true),
         "lambda_fp": jnp.asarray(lambda_true),
+        "kappa_ext_fp": jnp.asarray(kappa_ext),
         "thetaE_fp": jnp.asarray(theta_true),
     }
 
@@ -418,7 +455,7 @@ def run_mcmc(data, key, tag):
 
     nuts = NUTS(
         fundamental_plane_model,
-        target_accept_prob=0.95,
+        target_accept_prob=0.9,
         init_strategy=init_to_value(values=build_init_values(data)),
     )
     mcmc = MCMC(
@@ -439,7 +476,12 @@ def run_mcmc(data, key, tag):
     inf_data = az.from_dict(posterior=posterior)
     az.to_netcdf(inf_data, RESULT_DIR / f"lens_fp_{tag}.nc")
 
-    trace_vars = ["h0", "Omegam", "w0", "wa", "lambda_mean", "lambda_sigma", "gamma_mean", "gamma_sigma", "beta_mean", "beta_sigma"]
+    trace_vars = [
+        "h0", "Omegam", "w0", "wa",
+        "lambda_mean", "lambda_sigma",
+        "kappa_mean", "kappa_scatter",
+        "gamma_mean", "gamma_sigma", "beta_mean", "beta_sigma",
+    ]
     trace_vars = [v for v in trace_vars if v in inf_data.posterior and inf_data.posterior[v].ndim == 2]
     if trace_vars:
         trace_axes = az.plot_trace(inf_data, var_names=trace_vars, compact=False)
@@ -466,7 +508,12 @@ if RUN_NOISY_INFERENCE:
     corner_vars = select_corner_vars(
         idata_clean,
         idata_noisy,
-        ["h0", "Omegam", "w0", "wa", "lambda_mean", "lambda_sigma", "gamma_mean", "gamma_sigma", "beta_mean", "beta_sigma"],
+        [
+            "h0", "Omegam", "w0", "wa",
+            "lambda_mean", "lambda_sigma",
+            "kappa_mean", "kappa_scatter",
+            "gamma_mean", "gamma_sigma", "beta_mean", "beta_sigma",
+        ],
     )
     make_overlay_corner(idata_clean, idata_noisy, corner_vars, FIG_DIR / "lens_fp_corner_overlay.pdf")
 else:

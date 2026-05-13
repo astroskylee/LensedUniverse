@@ -57,6 +57,9 @@ cosmo_prior = {
     "h0_up": 80.0,  "h0_low": 60.0,
     "omegam_up": 0.5, "omegam_low": 0.1,
 }
+KAPPA_EXT_MEAN_TRUE = 0.0
+KAPPA_EXT_SCATTER_TRUE = 0.05
+SIGMA_KAPPA_EXT = 0.03
 
 step("Load lensing lookup table and Euclid lens catalog")
 LUT = np.load(DATA_DIR / "velocity_disp_table.npy")
@@ -88,7 +91,11 @@ beta_true = tool.truncated_normal(0.0, 0.2, -0.4, 0.4, N_lens, random_state=rng_
 vel_model = jampy_interp(thetaE_lens, gamma_true, re_lens, beta_true) * jnp.sqrt(ds_lens / dls_lens)
 
 lambda_true = tool.truncated_normal(1.0, 0.05, 0.8, 1.2, N_lens, random_state=rng_np)
-vel_true = vel_model * jnp.sqrt(lambda_true)
+kappa_ext_true = tool.truncated_normal(
+    KAPPA_EXT_MEAN_TRUE, KAPPA_EXT_SCATTER_TRUE, -0.2, 0.3, N_lens, random_state=rng_np
+)
+vel_true = vel_model * jnp.sqrt(lambda_true * (1.0 - kappa_ext_true))
+kappa_ext_err = np.full(N_lens, SIGMA_KAPPA_EXT)
 
 theta_E_err = 0.01 * thetaE_lens
 vel_err = 0.10 * vel_true
@@ -96,12 +103,14 @@ vel_err = 0.10 * vel_true
 gamma_obs_clean = gamma_true
 theta_E_obs_clean = thetaE_lens
 vel_obs_clean = vel_true
+kappa_ext_obs_clean = kappa_ext_true
 
 gamma_obs_noisy = gamma_true + tool.truncated_normal(0.0, 0.05, -0.2, 0.2, N_lens, random_state=rng_np)
 theta_E_obs_noisy = thetaE_lens + np.random.normal(0.0, theta_E_err)
 vel_obs_noisy = np.random.normal(vel_true, vel_err)
+kappa_ext_obs_noisy = kappa_ext_true + rng_np.normal(0.0, kappa_ext_err)
 
-def build_data(gamma_obs, theta_E_obs, vel_obs):
+def build_data(gamma_obs, theta_E_obs, vel_obs, kappa_ext_obs):
     return {
         "zl": zl_lens,
         "zs": zs_lens,
@@ -111,10 +120,12 @@ def build_data(gamma_obs, theta_E_obs, vel_obs):
         "gamma_obs": gamma_obs,
         "vel_obs": vel_obs,
         "vel_err": vel_err,
+        "kappa_ext_obs": kappa_ext_obs,
+        "kappa_ext_err": kappa_ext_err,
     }
 
-lens_data_clean = build_data(gamma_obs_clean, theta_E_obs_clean, vel_obs_clean)
-lens_data_noisy = build_data(gamma_obs_noisy, theta_E_obs_noisy, vel_obs_noisy)
+lens_data_clean = build_data(gamma_obs_clean, theta_E_obs_clean, vel_obs_clean, kappa_ext_obs_clean)
+lens_data_noisy = build_data(gamma_obs_noisy, theta_E_obs_noisy, vel_obs_noisy, kappa_ext_obs_noisy)
 
 def cosmology_model(kind, cosmo_prior, sample_h0=True):
     cosmo = {
@@ -140,6 +151,8 @@ def lens_model(lens_data):
 
     lambda_mean = numpyro.sample("lambda_mean", dist.Uniform(0.9, 1.1))
     lambda_sigma = numpyro.sample("lambda_sigma", dist.TruncatedNormal(0.05, 0.5, low=0.0, high=0.2))
+    kappa_mean = numpyro.sample("kappa_mean", dist.Uniform(-0.05, 0.05))
+    kappa_scatter = numpyro.sample("kappa_scatter", dist.Uniform(0.0, 0.1))
 
     gamma_mean = numpyro.sample("gamma_mean", dist.Uniform(1.4, 2.6))
     gamma_sigma = numpyro.sample("gamma_sigma", dist.TruncatedNormal(0.2, 0.2, low=0.0, high=0.4))
@@ -153,11 +166,21 @@ def lens_model(lens_data):
         gamma_i = numpyro.sample("gamma_i", dist.TruncatedNormal(gamma_mean, gamma_sigma, low=1.4, high=2.6))
         beta_i = numpyro.sample("beta_i", dist.TruncatedNormal(beta_mean, beta_sigma, low=-0.4, high=0.4))
         lambda_lens = numpyro.sample("lambda_lens", dist.TruncatedNormal(lambda_mean, lambda_sigma, low=0.8, high=1.2))
+        kappa_ext_lens = numpyro.sample(
+            "kappa_ext_lens",
+            dist.TruncatedNormal(kappa_mean, kappa_scatter, low=-0.2, high=0.3),
+        )
         theta_E_i = numpyro.sample("theta_E_i", dist.Normal(lens_data["theta_E"], lens_data["theta_E_err"]))
         v_interp = jampy_interp(theta_E_i, gamma_i, lens_data["re"], beta_i)
-        vel_pred = v_interp * jnp.sqrt(ds_lens / dls_lens) * jnp.sqrt(lambda_lens)
+        lambda_eff_lens = lambda_lens * (1.0 - kappa_ext_lens)
+        vel_pred = v_interp * jnp.sqrt(ds_lens / dls_lens) * jnp.sqrt(lambda_eff_lens)
 
         numpyro.sample("gamma_obs_lens", dist.Normal(gamma_i, 0.05), obs=lens_data["gamma_obs"])
+        numpyro.sample(
+            "kappa_ext_lens_like",
+            dist.Normal(kappa_ext_lens, lens_data["kappa_ext_err"]),
+            obs=lens_data["kappa_ext_obs"],
+        )
         numpyro.sample("vel_lens_like", dist.Normal(vel_pred, lens_data["vel_err"]), obs=lens_data["vel_obs"])
 
 
@@ -168,6 +191,8 @@ def build_init_values(lens_data):
     lambda_lens = np.ones_like(gamma_i, dtype=np.float64)
     theta_E_i = np.asarray(lens_data["theta_E"], dtype=np.float64)
     theta_E_i = np.maximum(theta_E_i, 1e-3)
+    kappa_ext_lens = np.asarray(lens_data["kappa_ext_obs"], dtype=np.float64)
+    kappa_ext_lens = np.clip(kappa_ext_lens, -0.199, 0.299)
     return {
         "Omegam": jnp.asarray(cosmo_true["Omegam"]),
         "w0": jnp.asarray(cosmo_true["w0"]),
@@ -175,6 +200,8 @@ def build_init_values(lens_data):
         "h0": jnp.asarray(cosmo_true["h0"]),
         "lambda_mean": jnp.asarray(1.0),
         "lambda_sigma": jnp.asarray(0.08),
+        "kappa_mean": jnp.asarray(0.0),
+        "kappa_scatter": jnp.asarray(0.05),
         "gamma_mean": jnp.asarray(2.0),
         "gamma_sigma": jnp.asarray(0.25),
         "beta_mean": jnp.asarray(0.0),
@@ -182,6 +209,7 @@ def build_init_values(lens_data):
         "gamma_i": jnp.asarray(gamma_i),
         "beta_i": jnp.asarray(beta_i),
         "lambda_lens": jnp.asarray(lambda_lens),
+        "kappa_ext_lens": jnp.asarray(kappa_ext_lens),
         "theta_E_i": jnp.asarray(theta_E_i),
     }
 
@@ -195,7 +223,7 @@ def run_mcmc(data, key, tag):
 
     nuts = NUTS(
         lens_model,
-        target_accept_prob=0.95,
+        target_accept_prob=0.9,
         init_strategy=init_to_value(values=build_init_values(data)),
     )
     mcmc = MCMC(
@@ -213,7 +241,12 @@ def run_mcmc(data, key, tag):
     posterior = mcmc.get_samples(group_by_chain=True)
     inf_data = az.from_dict(posterior=posterior)
     az.to_netcdf(inf_data, RESULT_DIR / f"lens_kin_{tag}.nc")
-    trace_vars = ["h0", "Omegam", "w0", "wa", "lambda_mean", "lambda_sigma", "gamma_mean", "gamma_sigma", "beta_mean", "beta_sigma"]
+    trace_vars = [
+        "h0", "Omegam", "w0", "wa",
+        "lambda_mean", "lambda_sigma",
+        "kappa_mean", "kappa_scatter",
+        "gamma_mean", "gamma_sigma", "beta_mean", "beta_sigma",
+    ]
     trace_vars = [v for v in trace_vars if v in inf_data.posterior and inf_data.posterior[v].ndim == 2]
     trace_axes = az.plot_trace(inf_data, var_names=trace_vars, compact=False)
     trace_fig = np.asarray(trace_axes).ravel()[0].figure
@@ -239,7 +272,12 @@ if RUN_NOISY_INFERENCE:
     corner_vars = select_corner_vars(
         idata_clean,
         idata_noisy,
-        ["h0", "Omegam", "w0", "wa", "lambda_mean", "lambda_sigma", "gamma_mean", "gamma_sigma", "beta_mean", "beta_sigma"],
+        [
+            "h0", "Omegam", "w0", "wa",
+            "lambda_mean", "lambda_sigma",
+            "kappa_mean", "kappa_scatter",
+            "gamma_mean", "gamma_sigma", "beta_mean", "beta_sigma",
+        ],
     )
     make_overlay_corner(idata_clean, idata_noisy, corner_vars, FIG_DIR / "lens_kin_corner_overlay.pdf")
 else:

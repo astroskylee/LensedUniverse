@@ -80,17 +80,24 @@ Mpc_km = tool.Mpc / 1000.0
 sigma_t_days = 1.0
 sigma_phi_frac = 0.04
 sigma_lambda_frac = 0.08
+KAPPA_EXT_MEAN_TRUE = 0.0
+KAPPA_EXT_SCATTER_TRUE = 0.05
+SIGMA_KAPPA_EXT = 0.03
 
 step("Build clean/noisy mock SNe observables")
 lambda_pop_mean = 1.0
 lambda_pop_sigma = 0.05
 lambda_low, lambda_high = 0.8, 1.2
 lambda_true = tool.truncated_normal(lambda_pop_mean, lambda_pop_sigma, lambda_low, lambda_high, len(zl), random_state=rng_np)
+kappa_ext_true = tool.truncated_normal(
+    KAPPA_EXT_MEAN_TRUE, KAPPA_EXT_SCATTER_TRUE, -0.2, 0.3, len(zl), random_state=rng_np
+)
+kappa_ext_err = np.full(len(zl), SIGMA_KAPPA_EXT)
 
 fermat_phi_true = (c_km_day * t_delay_true_days) / (Ddt_geom * Mpc_km)
 fermat_phi_true = np.asarray(fermat_phi_true)
 
-t_delay_true_mst = t_delay_true_days * lambda_true
+t_delay_true_mst = t_delay_true_days * lambda_true * (1.0 - kappa_ext_true)
 
 # scale phi
 
@@ -108,6 +115,8 @@ def scale_phi(phi_obs):
 phi_true_scaled, phi_scale = scale_phi(fermat_phi_true)
 
 lambda_err = sigma_lambda_frac * np.abs(lambda_true)
+kappa_ext_obs_clean = kappa_ext_true.copy()
+kappa_ext_obs_noisy = kappa_ext_true + rng_np.normal(0.0, kappa_ext_err)
 
 # clean
 phi_obs_clean_scaled = phi_true_scaled.copy()
@@ -122,7 +131,7 @@ t_obs_noisy = t_delay_true_mst + rng_np.normal(0.0, sigma_t_days, size=len(zl))
 lambda_obs_noisy = lambda_true + rng_np.normal(0.0, lambda_err)
 
 
-def build_data(t_obs, phi_obs_scaled, lambda_obs):
+def build_data(t_obs, phi_obs_scaled, lambda_obs, kappa_ext_obs):
     return {
         "zl": zl,
         "zs": zs,
@@ -131,10 +140,12 @@ def build_data(t_obs, phi_obs_scaled, lambda_obs):
         "phi_scale": phi_scale,
         "lambda_obs": lambda_obs,
         "lambda_err": lambda_err,
+        "kappa_ext_obs": kappa_ext_obs,
+        "kappa_ext_err": kappa_ext_err,
     }
 
-sne_data_clean = build_data(t_obs_clean, phi_obs_clean_scaled, lambda_obs_clean)
-sne_data_noisy = build_data(t_obs_noisy, phi_obs_noisy_scaled, lambda_obs_noisy)
+sne_data_clean = build_data(t_obs_clean, phi_obs_clean_scaled, lambda_obs_clean, kappa_ext_obs_clean)
+sne_data_noisy = build_data(t_obs_noisy, phi_obs_noisy_scaled, lambda_obs_noisy, kappa_ext_obs_noisy)
 
 
 def cosmology_model(kind, cosmo_prior, sample_h0=True):
@@ -156,10 +167,24 @@ def cosmology_model(kind, cosmo_prior, sample_h0=True):
     return cosmo
 
 
-def sne_model(zl, zs, t_obs, phi_obs, lambda_obs, lambda_err, phi_scale, sigma_t_days=1.0, sigma_phi_frac=0.04):
+def sne_model(
+    zl,
+    zs,
+    t_obs,
+    phi_obs,
+    lambda_obs,
+    lambda_err,
+    phi_scale,
+    kappa_ext_obs,
+    kappa_ext_err,
+    sigma_t_days=1.0,
+    sigma_phi_frac=0.04,
+):
     cosmo = cosmology_model("waw0cdm", cosmo_prior, sample_h0=True)
     lambda_mean = numpyro.sample("lambda_mean", dist.Uniform(0.9, 1.1))
     lambda_sigma = numpyro.sample("lambda_sigma", dist.TruncatedNormal(0.05, 0.5, low=0.0, high=0.2))
+    kappa_mean = numpyro.sample("kappa_mean", dist.Uniform(-0.05, 0.05))
+    kappa_scatter = numpyro.sample("kappa_scatter", dist.Uniform(0.0, 0.1))
 
     zl = jnp.asarray(zl)
     zs = jnp.asarray(zs)
@@ -168,6 +193,8 @@ def sne_model(zl, zs, t_obs, phi_obs, lambda_obs, lambda_err, phi_scale, sigma_t
     lambda_obs = jnp.asarray(lambda_obs)
     lambda_err = jnp.asarray(lambda_err)
     phi_scale = jnp.asarray(phi_scale)
+    kappa_ext_obs = jnp.asarray(kappa_ext_obs)
+    kappa_ext_err = jnp.asarray(kappa_ext_err)
 
     Dl, Ds, Dls = tool.dldsdls(zl, zs, cosmo, n=20)
     Ddt_geom = (1.0 + zl) * Dl * Ds / Dls
@@ -177,10 +204,15 @@ def sne_model(zl, zs, t_obs, phi_obs, lambda_obs, lambda_err, phi_scale, sigma_t
     with numpyro.plate("sne", zl.shape[0]):
         phi_true_scaled = numpyro.sample("phi_true_scaled", dist.TruncatedNormal(phi_obs, sigma_phi, low=0.0, high=10.0))
         lambda_true = numpyro.sample("lambda_true", dist.TruncatedNormal(lambda_mean, lambda_sigma, low=0.8, high=1.2))
+        kappa_ext = numpyro.sample(
+            "kappa_ext",
+            dist.TruncatedNormal(kappa_mean, kappa_scatter, low=-0.2, high=0.3),
+        )
         numpyro.sample("lambda_like", dist.Normal(lambda_true, lambda_err), obs=lambda_obs)
+        numpyro.sample("kappa_ext_like", dist.Normal(kappa_ext, kappa_ext_err), obs=kappa_ext_obs)
 
         phi_true = phi_true_scaled / phi_scale
-        Ddt_true = Ddt_geom * lambda_true
+        Ddt_true = Ddt_geom * lambda_true * (1.0 - kappa_ext)
         t_model_days = (Ddt_true * Mpc_km / c_km_day) * phi_true
         numpyro.sample("t_delay_like", dist.Normal(t_model_days, sigma_t_days), obs=t_obs)
 
@@ -188,6 +220,8 @@ def sne_model(zl, zs, t_obs, phi_obs, lambda_obs, lambda_err, phi_scale, sigma_t
 def build_init_values(sne_data):
     lambda_true = np.asarray(sne_data["lambda_obs"], dtype=np.float64)
     lambda_true = np.clip(lambda_true, 0.801, 1.199)
+    kappa_ext = np.asarray(sne_data["kappa_ext_obs"], dtype=np.float64)
+    kappa_ext = np.clip(kappa_ext, -0.199, 0.299)
     phi_true_scaled = np.asarray(sne_data["phi_obs"], dtype=np.float64)
     phi_true_scaled = np.clip(phi_true_scaled, 1e-3, 9.999)
     return {
@@ -197,8 +231,11 @@ def build_init_values(sne_data):
         "h0": jnp.asarray(cosmo_true["h0"]),
         "lambda_mean": jnp.asarray(1.0),
         "lambda_sigma": jnp.asarray(0.08),
+        "kappa_mean": jnp.asarray(0.0),
+        "kappa_scatter": jnp.asarray(0.05),
         "phi_true_scaled": jnp.asarray(phi_true_scaled),
         "lambda_true": jnp.asarray(lambda_true),
+        "kappa_ext": jnp.asarray(kappa_ext),
     }
 
 
@@ -211,7 +248,7 @@ def run_mcmc(data, key, tag):
 
     nuts = NUTS(
         sne_model,
-        target_accept_prob=0.95,
+        target_accept_prob=0.9,
         init_strategy=init_to_value(values=build_init_values(data)),
     )
     mcmc = MCMC(
@@ -231,6 +268,8 @@ def run_mcmc(data, key, tag):
         lambda_obs=data["lambda_obs"],
         lambda_err=data["lambda_err"],
         phi_scale=data["phi_scale"],
+        kappa_ext_obs=data["kappa_ext_obs"],
+        kappa_ext_err=data["kappa_ext_err"],
         sigma_t_days=sigma_t_days,
         sigma_phi_frac=sigma_phi_frac,
     )
@@ -240,7 +279,7 @@ def run_mcmc(data, key, tag):
     posterior = mcmc.get_samples(group_by_chain=True)
     inf_data = az.from_dict(posterior=posterior)
     az.to_netcdf(inf_data, RESULT_DIR / f"sne_{tag}.nc")
-    trace_vars = ["h0", "Omegam", "w0", "wa", "lambda_mean", "lambda_sigma"]
+    trace_vars = ["h0", "Omegam", "w0", "wa", "lambda_mean", "lambda_sigma", "kappa_mean", "kappa_scatter"]
     trace_vars = [v for v in trace_vars if v in inf_data.posterior and inf_data.posterior[v].ndim == 2]
     if trace_vars:
         trace_axes = az.plot_trace(inf_data, var_names=trace_vars, compact=False)
@@ -267,7 +306,7 @@ if RUN_NOISY_INFERENCE:
     corner_vars = select_corner_vars(
         idata_clean,
         idata_noisy,
-        ["h0", "Omegam", "w0", "wa", "lambda_mean", "lambda_sigma"],
+        ["h0", "Omegam", "w0", "wa", "lambda_mean", "lambda_sigma", "kappa_mean", "kappa_scatter"],
     )
     make_overlay_corner(idata_clean, idata_noisy, corner_vars, FIG_DIR / "sne_corner_overlay.pdf")
 else:

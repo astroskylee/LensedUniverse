@@ -50,6 +50,11 @@ USE_NOISY_LENS = _env_flag("COMBINE_NOISY_LENS")
 USE_NOISY_SNE = _env_flag("COMBINE_NOISY_SNE")
 USE_NOISY_QUASAR = _env_flag("COMBINE_NOISY_QUASAR")
 
+SIGMA_ETA_LOS_FRAC = 0.01
+KAPPA_EXT_MEAN_TRUE = 0.0
+KAPPA_EXT_SCATTER_TRUE = 0.05
+SIGMA_KAPPA_EXT = 0.03
+
 
 # %% cosmology model & priors
 def cosmology_model(kind, cosmo_prior, sample_h0=True):
@@ -117,7 +122,8 @@ beta_true_dspl = tool.beta_antimst(beta_geom_dspl, mst=lambda_true_dspl)
 if USE_NOISY_DSPL:
     lambda_obs_dspl = lambda_true_dspl + np.random.normal(0.0, lambda_err_dspl)
     obs_vel_dspl = true_vel_dspl + np.random.normal(0.0, vel_err_dspl)
-    beta_obs_dspl = tool.truncated_normal(beta_true_dspl, beta_err_dspl, 0.0, 1.0, random_state=rng_np)
+    beta_err_tot_dspl = np.sqrt(beta_err_dspl**2 + (SIGMA_ETA_LOS_FRAC * np.asarray(beta_true_dspl))**2)
+    beta_obs_dspl = tool.truncated_normal(beta_true_dspl, beta_err_tot_dspl, 0.0, 1.0, random_state=rng_np)
 else:
     lambda_obs_dspl = lambda_true_dspl
     obs_vel_dspl = true_vel_dspl
@@ -165,7 +171,11 @@ gamma_true_lens = tool.truncated_normal(2.0, 0.2, 1.5, 2.5, N_lens, random_state
 beta_true_lens  = tool.truncated_normal(0.0, 0.2, -0.4, 0.4, N_lens, random_state=rng_np)
 vel_model_lens = jampy_interp(thetaE_lens, gamma_true_lens, re_lens, beta_true_lens) * jnp.sqrt(ds_lens / dls_lens)
 lambda_true_lens = tool.truncated_normal(1.0, 0.05, 0.8, 1.2, N_lens, random_state=rng_np)
-vel_true_lens = vel_model_lens * jnp.sqrt(lambda_true_lens)
+kappa_ext_true_lens = tool.truncated_normal(
+    KAPPA_EXT_MEAN_TRUE, KAPPA_EXT_SCATTER_TRUE, -0.2, 0.3, N_lens, random_state=rng_np
+)
+vel_true_lens = vel_model_lens * jnp.sqrt(lambda_true_lens * (1.0 - kappa_ext_true_lens))
+kappa_ext_err_lens = np.full(N_lens, SIGMA_KAPPA_EXT)
 
 theta_E_err = 0.01 * thetaE_lens
 vel_err_lens = 0.10 * vel_true_lens
@@ -174,10 +184,12 @@ if USE_NOISY_LENS:
     gamma_obs_lens = gamma_true_lens + tool.truncated_normal(0.0, 0.05, -0.2, 0.2, N_lens, random_state=rng_np)
     thetaE_lens_obs = thetaE_lens + np.random.normal(0.0, theta_E_err)
     vel_obs_lens = np.random.normal(vel_true_lens, vel_err_lens)
+    kappa_ext_obs_lens = kappa_ext_true_lens + rng_np.normal(0.0, kappa_ext_err_lens)
 else:
     gamma_obs_lens = gamma_true_lens
     thetaE_lens_obs = thetaE_lens
     vel_obs_lens = vel_true_lens
+    kappa_ext_obs_lens = kappa_ext_true_lens
 
 lens_data = {
     "zl": zl_lens,
@@ -188,6 +200,8 @@ lens_data = {
     "gamma_obs": gamma_obs_lens,
     "vel_obs": vel_obs_lens,
     "vel_err": vel_err_lens,
+    "kappa_ext_obs": kappa_ext_obs_lens,
+    "kappa_ext_err": kappa_ext_err_lens,
 }
 # %% 3) Lensed SNe mock data (time-delay likelihood)
 sn_data = pd.read_csv(os.path.join(DATA_DIR, "Euclid_150SNe.csv"))
@@ -206,6 +220,10 @@ lambda_pop_mean = 1.0
 lambda_pop_sigma = 0.05
 lambda_low, lambda_high = 0.8, 1.2
 lambda_true_sne = tool.truncated_normal(lambda_pop_mean, lambda_pop_sigma, lambda_low, lambda_high, N_sne, random_state=rng_np)
+kappa_ext_true_sne = tool.truncated_normal(
+    KAPPA_EXT_MEAN_TRUE, KAPPA_EXT_SCATTER_TRUE, -0.2, 0.3, N_sne, random_state=rng_np
+)
+kappa_ext_err_sne = np.full(N_sne, SIGMA_KAPPA_EXT)
 
 seconds_per_day = 86400.0
 Mpc_km = tool.Mpc / 1000.0
@@ -213,8 +231,8 @@ Mpc_km = tool.Mpc / 1000.0
 # Fermat potential difference from baseline time delay (no MST in phi)
 fermat_phi_true = (tool.c_km_s * t_delay_true_days * seconds_per_day) / (Ddt_geom_sne * Mpc_km)
 
-# Time-delay true includes MST transform
-t_delay_true_mst = t_delay_true_days * lambda_true_sne
+# Time-delay true includes MST and external convergence transforms
+t_delay_true_mst = t_delay_true_days * lambda_true_sne * (1.0 - kappa_ext_true_sne)
 
 # Measurement errors (assumed in likelihood)
 sigma_t_days = 1.0
@@ -226,10 +244,12 @@ if USE_NOISY_SNE:
     t_delay_obs = t_delay_true_mst + np.random.normal(0.0, sigma_t_days, size=N_sne)
     fermat_phi_obs = fermat_phi_true + np.random.normal(0.0, sigma_phi_frac * np.abs(fermat_phi_true))
     lambda_obs_sne = lambda_true_sne + np.random.normal(0.0, sigma_lambda_frac * np.abs(lambda_true_sne))
+    kappa_ext_obs_sne = kappa_ext_true_sne + rng_np.normal(0.0, kappa_ext_err_sne)
 else:
     t_delay_obs = t_delay_true_mst.copy()
     fermat_phi_obs = fermat_phi_true.copy()
     lambda_obs_sne = lambda_true_sne.copy()
+    kappa_ext_obs_sne = kappa_ext_true_sne.copy()
 
 lambda_err_sne = sigma_lambda_frac * np.abs(lambda_obs_sne)
 
@@ -255,6 +275,8 @@ sne_data = {
     "phi_scale": phi_scale_sne,
     "lambda_obs": lambda_obs_sne,
     "lambda_err": lambda_err_sne,
+    "kappa_ext_obs": kappa_ext_obs_sne,
+    "kappa_ext_err": kappa_ext_err_sne,
 }
 # %% 4) Lensed Quasar mock data (time-delay likelihood)
 DATA_JSON = Path("../Temp_data/static_datavectors_seed6.json")
@@ -337,6 +359,10 @@ phi_err_frac_q = np.asarray([phi_err_frac_by_block[b] for b in block_id_q])
 phi_err_q = phi_err_frac_q * np.abs(phi_true_q)
 
 lambda_true_q = tool.truncated_normal(1.0, 0.05, 0.8, 1.2, z_lens_q.size, random_state=rng_np)
+kappa_ext_true_q = tool.truncated_normal(
+    KAPPA_EXT_MEAN_TRUE, KAPPA_EXT_SCATTER_TRUE, -0.2, 0.3, z_lens_q.size, random_state=rng_np
+)
+kappa_ext_err_q = np.full(z_lens_q.size, SIGMA_KAPPA_EXT)
 
 sigma_v_frac_q = np.asarray([sigma_v_frac_by_block[b] for b in block_id_q])
 mst_mask_q = np.isfinite(sigma_v_frac_q)
@@ -347,16 +373,18 @@ lambda_err_q = np.where(
     0.05,
 )
 
-t_true_q = t_base_q * lambda_true_q
+t_true_q = t_base_q * lambda_true_q * (1.0 - kappa_ext_true_q)
 
 if USE_NOISY_QUASAR:
     t_obs_q = t_true_q + rng_np.normal(0.0, t_err_q)
     phi_obs_q = phi_true_q + rng_np.normal(0.0, phi_err_q)
     lambda_obs_q = lambda_true_q + rng_np.normal(0.0, lambda_err_q)
+    kappa_ext_obs_q = kappa_ext_true_q + rng_np.normal(0.0, kappa_ext_err_q)
 else:
     t_obs_q = t_true_q.copy()
     phi_obs_q = phi_true_q.copy()
     lambda_obs_q = lambda_true_q.copy()
+    kappa_ext_obs_q = kappa_ext_true_q.copy()
 
 phi_obs_q_scaled, phi_scale_q = scale_phi(phi_obs_q)
 phi_err_q_scaled = phi_err_frac_q * np.abs(phi_obs_q_scaled)
@@ -372,6 +400,8 @@ quasar_data = {
     "lambda_obs": lambda_obs_q,
     "lambda_err": lambda_err_q,
     "mst_mask": mst_mask_q,
+    "kappa_ext_obs": kappa_ext_obs_q,
+    "kappa_ext_err": kappa_ext_err_q,
 }
 # %% joint hierarchical model
 def joint_model(dspl_data = None, lens_data = None, sne_data = None, quasar_data = None):
@@ -410,8 +440,9 @@ def joint_model(dspl_data = None, lens_data = None, sne_data = None, quasar_data
                            obs=jnp.asarray(dspl_data["lambda_obs"]))
     
             beta_mst = tool.beta_antimst(beta_geom, lambda_dspl)
+            beta_err_tot = jnp.sqrt(jnp.asarray(dspl_data["beta_err"])**2 + (SIGMA_ETA_LOS_FRAC * beta_mst)**2)
             numpyro.sample("beta_dspl_like",
-                           dist.TruncatedNormal(beta_mst, jnp.asarray(dspl_data["beta_err"]), low=0.0, high=1.0),
+                           dist.TruncatedNormal(beta_mst, beta_err_tot, low=0.0, high=1.0),
                            obs=jnp.asarray(dspl_data["beta_obs"]))
 
 
@@ -419,6 +450,8 @@ def joint_model(dspl_data = None, lens_data = None, sne_data = None, quasar_data
     if lens_data is not None:
         lambda_mean_lens = numpyro.sample("lambda_mean_lens", dist.Uniform(0.9, 1.1))
         lambda_sigma_lens = numpyro.sample("lambda_sigma_lens", dist.TruncatedNormal(0.05, 0.5, low=0.0, high=0.2))
+        kappa_mean_lens = numpyro.sample("kappa_mean_lens", dist.Uniform(-0.05, 0.05))
+        kappa_scatter_lens = numpyro.sample("kappa_scatter_lens", dist.Uniform(0.0, 0.1))
         # lens+kin distances
         dl_lens, ds_lens, dls_lens = tool.dldsdls(lens_data["zl"], lens_data["zs"], cosmo, n=20)
         N_lens = len(lens_data["zl"])
@@ -435,16 +468,26 @@ def joint_model(dspl_data = None, lens_data = None, sne_data = None, quasar_data
                 "lambda_lens",
                 dist.TruncatedNormal(lambda_mean_lens, lambda_sigma_lens, low=0.8, high=1.2),
             )
+            kappa_ext_lens = numpyro.sample(
+                "kappa_ext_lens",
+                dist.TruncatedNormal(kappa_mean_lens, kappa_scatter_lens, low=-0.2, high=0.3),
+            )
             theta_E_i = numpyro.sample(
                 "theta_E_i",
                 dist.Normal(lens_data["theta_E"], lens_data["theta_E_err"]),
             )
             v_interp = jampy_interp(theta_E_i, gamma_i, lens_data["re"], beta_i)
-            vel_pred = v_interp * jnp.sqrt(ds_lens / dls_lens) * jnp.sqrt(lambda_lens)
+            lambda_eff_lens = lambda_lens * (1.0 - kappa_ext_lens)
+            vel_pred = v_interp * jnp.sqrt(ds_lens / dls_lens) * jnp.sqrt(lambda_eff_lens)
     
             numpyro.sample("gamma_obs_lens",
                            dist.Normal(gamma_i, 0.05),
                            obs=lens_data["gamma_obs"])
+            numpyro.sample(
+                "kappa_ext_lens_like",
+                dist.Normal(kappa_ext_lens, lens_data["kappa_ext_err"]),
+                obs=lens_data["kappa_ext_obs"],
+            )
             numpyro.sample("vel_lens_like",
                            dist.Normal(vel_pred, lens_data["vel_err"]),
                            obs=lens_data["vel_obs"])
@@ -452,6 +495,8 @@ def joint_model(dspl_data = None, lens_data = None, sne_data = None, quasar_data
     if sne_data is not None:
         lambda_mean_sne = numpyro.sample("lambda_mean_sne", dist.Uniform(0.9, 1.1))
         lambda_sigma_sne = numpyro.sample("lambda_sigma_sne", dist.TruncatedNormal(0.05, 0.5, low=0.0, high=0.2))
+        kappa_mean_sne = numpyro.sample("kappa_mean_sne", dist.Uniform(-0.05, 0.05))
+        kappa_scatter_sne = numpyro.sample("kappa_scatter_sne", dist.Uniform(0.0, 0.1))
         # SNe distances
         Dl_sne, Ds_sne, Dls_sne = tool.dldsdls(sne_data["zl"], sne_data["zs"], cosmo, n=20)
         Ddt_geom = (1.0 + sne_data["zl"]) * Dl_sne * Ds_sne / Dls_sne
@@ -467,14 +512,23 @@ def joint_model(dspl_data = None, lens_data = None, sne_data = None, quasar_data
         with numpyro.plate("sne", N_sne):
             phi_true_scaled = numpyro.sample("phi_true_scaled_sne", dist.TruncatedNormal(phi_obs, sigma_phi, low=0.0, high=10.0))
             lambda_sne = numpyro.sample("lambda_sne", dist.TruncatedNormal(lambda_mean_sne, lambda_sigma_sne, low=0.8, high=1.2))
+            kappa_ext_sne = numpyro.sample(
+                "kappa_ext_sne",
+                dist.TruncatedNormal(kappa_mean_sne, kappa_scatter_sne, low=-0.2, high=0.3),
+            )
             numpyro.sample(
                 "lambda_sne_like",
                 dist.Normal(lambda_sne, lambda_err),
                 obs=lambda_obs,
             )
+            numpyro.sample(
+                "kappa_ext_sne_like",
+                dist.Normal(kappa_ext_sne, sne_data["kappa_ext_err"]),
+                obs=sne_data["kappa_ext_obs"],
+            )
 
             phi_true = phi_true_scaled / phi_scale
-            Ddt_true = Ddt_geom * lambda_sne
+            Ddt_true = Ddt_geom * lambda_sne * (1.0 - kappa_ext_sne)
             t_model_days = (Ddt_true * Mpc_km / tool.c_km_s) * phi_true / seconds_per_day
             numpyro.sample(
                 "t_delay_sne_like",
@@ -486,6 +540,8 @@ def joint_model(dspl_data = None, lens_data = None, sne_data = None, quasar_data
     if quasar_data is not None:
         lambda_mean_quasar = numpyro.sample("lambda_mean_quasar", dist.Uniform(0.9, 1.1))
         lambda_sigma_quasar = numpyro.sample("lambda_sigma_quasar", dist.TruncatedNormal(0.05, 0.5, low=0.0, high=0.2))
+        kappa_mean_quasar = numpyro.sample("kappa_mean_quasar", dist.Uniform(-0.05, 0.05))
+        kappa_scatter_quasar = numpyro.sample("kappa_scatter_quasar", dist.Uniform(0.0, 0.1))
         Dl_q, Ds_q, Dls_q = tool.dldsdls(quasar_data["zl"], quasar_data["zs"], cosmo, n=20)
         Ddt_geom_q = (1.0 + quasar_data["zl"]) * Dl_q * Ds_q / Dls_q
         N_q = len(quasar_data["zl"])
@@ -502,10 +558,19 @@ def joint_model(dspl_data = None, lens_data = None, sne_data = None, quasar_data
         with numpyro.plate("quasar", N_q):
             phi_true_scaled = numpyro.sample("phi_true_scaled_q", dist.Normal(phi_obs, phi_err))
             lambda_q = numpyro.sample("lambda_q", dist.TruncatedNormal(lambda_mean_quasar, lambda_sigma_quasar, low=0.8, high=1.2))
+            kappa_ext_quasar = numpyro.sample(
+                "kappa_ext_quasar",
+                dist.TruncatedNormal(kappa_mean_quasar, kappa_scatter_quasar, low=-0.2, high=0.3),
+            )
             numpyro.sample("lambda_q_like", dist.Normal(lambda_q, lambda_err).mask(mst_mask), obs=lambda_obs)
+            numpyro.sample(
+                "kappa_ext_quasar_like",
+                dist.Normal(kappa_ext_quasar, quasar_data["kappa_ext_err"]),
+                obs=quasar_data["kappa_ext_obs"],
+            )
 
             phi_true = phi_true_scaled / phi_scale
-            Ddt_true = Ddt_geom_q * lambda_q
+            Ddt_true = Ddt_geom_q * lambda_q * (1.0 - kappa_ext_quasar)
             t_model_days = (Ddt_true * Mpc_km / tool.c_km_s) * phi_true / seconds_per_day
             numpyro.sample("t_delay_q_like", dist.Normal(t_model_days, t_err), obs=t_obs)
 
@@ -531,7 +596,7 @@ if TEST_MODE:
     num_chains = 2
     chain_method = "sequential"
 else:
-    N_DSPL_USE = 1200
+    N_DSPL_USE = 500
     N_LENS_USE = 5000
     N_SNE_USE = 50
     N_QUASAR_USE = 500
@@ -558,6 +623,12 @@ init_values = {
     "lambda_sigma_sne": 0.08,
     "lambda_mean_quasar": 1.0,
     "lambda_sigma_quasar": 0.08,
+    "kappa_mean_lens": 0.0,
+    "kappa_scatter_lens": 0.05,
+    "kappa_mean_sne": 0.0,
+    "kappa_scatter_sne": 0.05,
+    "kappa_mean_quasar": 0.0,
+    "kappa_scatter_quasar": 0.05,
     # 也可以给 hyper-sigma、gamma_mean 等加上
     "gamma_mean": 2.0,
     "gamma_sigma": 0.2,
@@ -567,7 +638,7 @@ init_values = {
 from numpyro.infer import init_to_value, init_to_median
 init_strategy = init_to_value(values=init_values)
 
-nuts_kernel = NUTS(joint_model, target_accept_prob=0.95, init_strategy=init_strategy)
+nuts_kernel = NUTS(joint_model, target_accept_prob=0.9, init_strategy=init_strategy)
 mcmc = MCMC(
     nuts_kernel,
     num_warmup=num_warmup,
@@ -584,11 +655,25 @@ corner_vars = [
     "beta_mean", "beta_sigma",
     "lambda_mean_dspl", "lambda_sigma_dspl",
     "lambda_mean_lens", "lambda_sigma_lens",
+    "kappa_mean_lens", "kappa_scatter_lens",
     "lambda_mean_sne", "lambda_sigma_sne",
+    "kappa_mean_sne", "kappa_scatter_sne",
     "lambda_mean_quasar", "lambda_sigma_quasar",
+    "kappa_mean_quasar", "kappa_scatter_quasar",
 ]
 import corner
-truths = [70, 0.32, -1.0, 0.0, 2.0, 0.2, 0.0, 0.2, 1.0, 0.08, 1.0, 0.08, 1.0, 0.08, 1.0, 0.08]
+truths = [
+    70, 0.32, -1.0, 0.0,
+    2.0, 0.2,
+    0.0, 0.2,
+    1.0, 0.08,
+    1.0, 0.08,
+    0.0, 0.05,
+    1.0, 0.08,
+    0.0, 0.05,
+    1.0, 0.08,
+    0.0, 0.05,
+]
 
 mcmc.run(rng_key, dspl_data=dspl_data, sne_data=sne_data, lens_data=lens_data, quasar_data=quasar_data)
 

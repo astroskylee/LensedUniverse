@@ -57,6 +57,9 @@ cosmo_prior = {
     "h0_up": 80.0,  "h0_low": 60.0,
     "omegam_up": 0.5, "omegam_low": 0.1,
 }
+KAPPA_EXT_MEAN_TRUE = 0.0
+KAPPA_EXT_SCATTER_TRUE = 0.05
+SIGMA_KAPPA_EXT = 0.03
 
 step("Load quasar block data and build time-delay base vectors")
 DATA_JSON = Path("../Temp_data/static_datavectors_seed6.json")
@@ -142,13 +145,17 @@ lambda_pop_mean = 1.0
 lambda_pop_sigma = 0.05
 lambda_low, lambda_high = 0.8, 1.2
 lambda_true = tool.truncated_normal(lambda_pop_mean, lambda_pop_sigma, lambda_low, lambda_high, z_lens.size, random_state=rng_np)
+kappa_ext_true = tool.truncated_normal(
+    KAPPA_EXT_MEAN_TRUE, KAPPA_EXT_SCATTER_TRUE, -0.2, 0.3, z_lens.size, random_state=rng_np
+)
+kappa_ext_err = np.full(z_lens.size, SIGMA_KAPPA_EXT)
 
 sigma_v_frac = np.asarray([sigma_v_frac_by_block[b] for b in block_id])
 mst_mask = np.isfinite(sigma_v_frac)
 mst_err_frac = 2.0 * sigma_v_frac
 lambda_err = np.where(mst_mask, mst_err_frac * np.abs(lambda_true), lambda_pop_sigma)
 
-t_true = t_base * lambda_true
+t_true = t_base * lambda_true * (1.0 - kappa_ext_true)
 
 step("Build clean/noisy mock quasar observables")
 def scale_phi(phi_in):
@@ -172,12 +179,14 @@ phi_obs_noisy_scaled = phi_obs_noisy * phi_scale
 
 lambda_obs_clean = lambda_true.copy()
 lambda_obs_noisy = lambda_true + rng_np.normal(0.0, lambda_err)
+kappa_ext_obs_clean = kappa_ext_true.copy()
+kappa_ext_obs_noisy = kappa_ext_true + rng_np.normal(0.0, kappa_ext_err)
 
 t_obs_clean = t_true.copy()
 t_obs_noisy = t_true + rng_np.normal(0.0, t_err)
 
 
-def build_data(t_obs, phi_obs_scaled, lambda_obs):
+def build_data(t_obs, phi_obs_scaled, lambda_obs, kappa_ext_obs):
     return {
         "zl": z_lens,
         "zs": z_src,
@@ -189,10 +198,12 @@ def build_data(t_obs, phi_obs_scaled, lambda_obs):
         "lambda_obs": lambda_obs,
         "lambda_err": lambda_err,
         "mst_mask": mst_mask,
+        "kappa_ext_obs": kappa_ext_obs,
+        "kappa_ext_err": kappa_ext_err,
     }
 
-quasar_data_clean = build_data(t_obs_clean, phi_obs_clean_scaled, lambda_obs_clean)
-quasar_data_noisy = build_data(t_obs_noisy, phi_obs_noisy_scaled, lambda_obs_noisy)
+quasar_data_clean = build_data(t_obs_clean, phi_obs_clean_scaled, lambda_obs_clean, kappa_ext_obs_clean)
+quasar_data_noisy = build_data(t_obs_noisy, phi_obs_noisy_scaled, lambda_obs_noisy, kappa_ext_obs_noisy)
 
 
 def cosmology_model(kind, cosmo_prior, sample_h0=True):
@@ -214,7 +225,20 @@ def cosmology_model(kind, cosmo_prior, sample_h0=True):
     return cosmo
 
 
-def quasar_model(zl, zs, t_obs, t_err, phi_obs, phi_err, phi_scale, lambda_obs, lambda_err, mst_mask):
+def quasar_model(
+    zl,
+    zs,
+    t_obs,
+    t_err,
+    phi_obs,
+    phi_err,
+    phi_scale,
+    lambda_obs,
+    lambda_err,
+    mst_mask,
+    kappa_ext_obs,
+    kappa_ext_err,
+):
     cosmo = cosmology_model("waw0cdm", cosmo_prior, sample_h0=True)
 
     zl = jnp.asarray(zl)
@@ -227,12 +251,21 @@ def quasar_model(zl, zs, t_obs, t_err, phi_obs, phi_err, phi_scale, lambda_obs, 
     lambda_obs = jnp.asarray(lambda_obs)
     lambda_err = jnp.asarray(lambda_err)
     mst_mask = jnp.asarray(mst_mask)
+    kappa_ext_obs = jnp.asarray(kappa_ext_obs)
+    kappa_ext_err = jnp.asarray(kappa_ext_err)
 
     lambda_mean = numpyro.sample("lambda_mean", dist.Uniform(0.9, 1.1))
     lambda_sigma = numpyro.sample("lambda_sigma", dist.TruncatedNormal(0.05, 0.5, low=0.0, high=0.2))
+    kappa_mean = numpyro.sample("kappa_mean", dist.Uniform(-0.05, 0.05))
+    kappa_scatter = numpyro.sample("kappa_scatter", dist.Uniform(0.0, 0.1))
     with numpyro.plate("lens", zl.shape[0]):
         lambda_true = numpyro.sample("lambda_true", dist.TruncatedNormal(lambda_mean, lambda_sigma, low=0.8, high=1.2))
+        kappa_ext = numpyro.sample(
+            "kappa_ext",
+            dist.TruncatedNormal(kappa_mean, kappa_scatter, low=-0.2, high=0.3),
+        )
         numpyro.sample("lambda_like", dist.Normal(lambda_true, lambda_err).mask(mst_mask), obs=lambda_obs)
+        numpyro.sample("kappa_ext_like", dist.Normal(kappa_ext, kappa_ext_err), obs=kappa_ext_obs)
 
     Dl, Ds, Dls = tool.dldsdls(zl, zs, cosmo, n=20)
     Ddt_geom = (1.0 + zl) * Dl * Ds / Dls
@@ -241,13 +274,15 @@ def quasar_model(zl, zs, t_obs, t_err, phi_obs, phi_err, phi_scale, lambda_obs, 
         phi_true_scaled = numpyro.sample("phi_true_scaled", dist.Normal(phi_obs, phi_err))
         phi_true = phi_true_scaled / phi_scale
         t_model_days = (Ddt_geom * Mpc_km / c_km_day) * phi_true
-        t_model_days = t_model_days * lambda_true
+        t_model_days = t_model_days * lambda_true * (1.0 - kappa_ext)
         numpyro.sample("t_delay_like", dist.Normal(t_model_days, t_err), obs=t_obs)
 
 
 def build_init_values(quasar_data):
     lambda_true = np.asarray(quasar_data["lambda_obs"], dtype=np.float64)
     lambda_true = np.clip(lambda_true, 0.801, 1.199)
+    kappa_ext = np.asarray(quasar_data["kappa_ext_obs"], dtype=np.float64)
+    kappa_ext = np.clip(kappa_ext, -0.199, 0.299)
     phi_true_scaled = np.asarray(quasar_data["phi_obs"], dtype=np.float64)
     return {
         "Omegam": jnp.asarray(cosmo_true["Omegam"]),
@@ -256,7 +291,10 @@ def build_init_values(quasar_data):
         "h0": jnp.asarray(cosmo_true["h0"]),
         "lambda_mean": jnp.asarray(1.0),
         "lambda_sigma": jnp.asarray(0.08),
+        "kappa_mean": jnp.asarray(0.0),
+        "kappa_scatter": jnp.asarray(0.05),
         "lambda_true": jnp.asarray(lambda_true),
+        "kappa_ext": jnp.asarray(kappa_ext),
         "phi_true_scaled": jnp.asarray(phi_true_scaled),
     }
 
@@ -270,7 +308,7 @@ def run_mcmc(data, key, tag):
 
     nuts = NUTS(
         quasar_model,
-        target_accept_prob=0.95,
+        target_accept_prob=0.9,
         init_strategy=init_to_value(values=build_init_values(data)),
     )
     mcmc = MCMC(
@@ -293,6 +331,8 @@ def run_mcmc(data, key, tag):
         lambda_obs=data["lambda_obs"],
         lambda_err=data["lambda_err"],
         mst_mask=data["mst_mask"],
+        kappa_ext_obs=data["kappa_ext_obs"],
+        kappa_ext_err=data["kappa_ext_err"],
     )
     extra = mcmc.get_extra_fields(group_by_chain=True)
     n_div = int(np.asarray(extra["diverging"]).sum())
@@ -300,7 +340,7 @@ def run_mcmc(data, key, tag):
     posterior = mcmc.get_samples(group_by_chain=True)
     inf_data = az.from_dict(posterior=posterior)
     az.to_netcdf(inf_data, RESULT_DIR / f"quasar_{tag}.nc")
-    trace_vars = ["h0", "Omegam", "w0", "wa", "lambda_mean", "lambda_sigma"]
+    trace_vars = ["h0", "Omegam", "w0", "wa", "lambda_mean", "lambda_sigma", "kappa_mean", "kappa_scatter"]
     trace_vars = [v for v in trace_vars if v in inf_data.posterior and inf_data.posterior[v].ndim == 2]
     if trace_vars:
         trace_axes = az.plot_trace(inf_data, var_names=trace_vars, compact=False)
@@ -327,7 +367,7 @@ if RUN_NOISY_INFERENCE:
     corner_vars = select_corner_vars(
         idata_clean,
         idata_noisy,
-        ["h0", "Omegam", "w0", "wa", "lambda_mean", "lambda_sigma"],
+        ["h0", "Omegam", "w0", "wa", "lambda_mean", "lambda_sigma", "kappa_mean", "kappa_scatter"],
     )
     make_overlay_corner(idata_clean, idata_noisy, corner_vars, FIG_DIR / "quasar_corner_overlay.pdf")
 else:
