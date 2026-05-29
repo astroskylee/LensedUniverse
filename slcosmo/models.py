@@ -57,7 +57,6 @@ class SLCOSMO:
 class SLmodel:
     def __init__(self, slcosmo):
         self.slcosmo = slcosmo
-        self.c = 299792.458  # km/s
 
         # Map model names to model methods.
         self.model_dict = {
@@ -172,12 +171,10 @@ class SLmodel:
         """Lensed SNe model."""
         zl = sne_data["zl_sne"]
         zs = sne_data["zs_sne"]
-        tmax = sne_data["tmax_sne"]
         Ddt_obs = sne_data["Ddt_obs_sne"]
         Ddt_err = sne_data["Ddt_err_sne"]
 
-        Dl_sne, Ds_sne, Dls_sne = tool.compute_distances(zl, zs, cosmology)
-        Ddt_sne = (1 + zl) * Dl_sne * Ds_sne / Dls_sne * self.c / cosmology["H0"] / 1000
+        Ddt_sne = tool.time_delay_distance(zl, zs, cosmology) / 1000
 
         with numpyro.plate("LensedSNe_data", len(zl)):
             numpyro.sample("Ddt_obs_sne", dist.Normal(Ddt_sne, Ddt_err / 1000), obs=Ddt_obs / 1000)
@@ -186,14 +183,12 @@ class SLmodel:
         """Lensed SNe model with MST bias."""
         zl = sne_data["zl_sne"]
         zs = sne_data["zs_sne"]
-        tmax = sne_data["tmax_sne"]
         Ddt_obs = sne_data["Ddt_obs_sne"]
         Ddt_err = sne_data["Ddt_err_sne"]
         lambda_int = sne_data["lambda_int"]
         lambda_int_err = sne_data["lambda_int_err"]
 
-        Dl_sne, Ds_sne, Dls_sne = tool.compute_distances(zl, zs, cosmology)
-        Ddt_sne_mst = (1 + zl) * Dl_sne * Ds_sne / Dls_sne * self.c / cosmology["H0"] / 1000
+        Ddt_sne_mst = tool.time_delay_distance(zl, zs, cosmology) / 1000
 
         with numpyro.plate("LensedSNe_data", len(zl)):
             Ddt_sne = Ddt_sne_mst * (numpyro.sample("mst_sn", dist.Normal(lambda_int, lambda_int_err)) + bias)

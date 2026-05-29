@@ -70,8 +70,7 @@ t_delay_true_days = sn_data["tmax"].to_numpy()
 
 zl_j = jnp.asarray(zl)
 zs_j = jnp.asarray(zs)
-Dl, Ds, Dls = tool.dldsdls(zl_j, zs_j, cosmo_true, n=20)
-Ddt_geom = (1.0 + zl_j) * Dl * Ds / Dls
+Ddt_geom = tool.time_delay_distance(zl_j, zs_j, cosmo_true, n=20)
 Ddt_geom = np.asarray(Ddt_geom)
 
 c_km_day = tool.c_km_s * 86400.0
@@ -196,8 +195,7 @@ def sne_model(
     kappa_ext_obs = jnp.asarray(kappa_ext_obs)
     kappa_ext_err = jnp.asarray(kappa_ext_err)
 
-    Dl, Ds, Dls = tool.dldsdls(zl, zs, cosmo, n=20)
-    Ddt_geom = (1.0 + zl) * Dl * Ds / Dls
+    Ddt_geom = tool.time_delay_distance(zl, zs, cosmo, n=20)
 
     sigma_phi = sigma_phi_frac * phi_obs
 

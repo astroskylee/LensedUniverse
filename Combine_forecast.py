@@ -211,8 +211,7 @@ zl_sne = np.array(sn_data["zl"])
 zs_sne = np.array(sn_data["z_host"])
 t_delay_true_days = np.array(sn_data["tmax"])
 
-Dl_sne, Ds_sne, Dls_sne = tool.dldsdls(zl_sne, zs_sne, cosmo_true, n=20)
-Ddt_geom_sne = (1.0 + zl_sne) * Dl_sne * Ds_sne / Dls_sne
+Ddt_geom_sne = tool.time_delay_distance(zl_sne, zs_sne, cosmo_true, n=20)
 
 N_sne = len(zl_sne)
 # Parent population for MST (lambda)
@@ -322,8 +321,7 @@ block_id_q = np.concatenate(block_id_list)
 
 zl_j = jnp.asarray(z_lens_q)
 zs_j = jnp.asarray(z_src_q)
-Dl_q, Ds_q, Dls_q = tool.dldsdls(zl_j, zs_j, cosmo_true, n=20)
-Ddt_geom_q = (1.0 + zl_j) * Dl_q * Ds_q / Dls_q
+Ddt_geom_q = tool.time_delay_distance(zl_j, zs_j, cosmo_true, n=20)
 Ddt_geom_q = np.asarray(Ddt_geom_q)
 
 c_km_day = tool.c_km_s * 86400.0
@@ -497,9 +495,7 @@ def joint_model(dspl_data = None, lens_data = None, sne_data = None, quasar_data
         lambda_sigma_sne = numpyro.sample("lambda_sigma_sne", dist.TruncatedNormal(0.05, 0.5, low=0.0, high=0.2))
         kappa_mean_sne = numpyro.sample("kappa_mean_sne", dist.Uniform(-0.05, 0.05))
         kappa_scatter_sne = numpyro.sample("kappa_scatter_sne", dist.Uniform(0.0, 0.1))
-        # SNe distances
-        Dl_sne, Ds_sne, Dls_sne = tool.dldsdls(sne_data["zl"], sne_data["zs"], cosmo, n=20)
-        Ddt_geom = (1.0 + sne_data["zl"]) * Dl_sne * Ds_sne / Dls_sne
+        Ddt_geom = tool.time_delay_distance(sne_data["zl"], sne_data["zs"], cosmo, n=20)
         N_sne = len(sne_data["zl"])
 
         t_obs = sne_data["t_obs"]
@@ -542,8 +538,7 @@ def joint_model(dspl_data = None, lens_data = None, sne_data = None, quasar_data
         lambda_sigma_quasar = numpyro.sample("lambda_sigma_quasar", dist.TruncatedNormal(0.05, 0.5, low=0.0, high=0.2))
         kappa_mean_quasar = numpyro.sample("kappa_mean_quasar", dist.Uniform(-0.05, 0.05))
         kappa_scatter_quasar = numpyro.sample("kappa_scatter_quasar", dist.Uniform(0.0, 0.1))
-        Dl_q, Ds_q, Dls_q = tool.dldsdls(quasar_data["zl"], quasar_data["zs"], cosmo, n=20)
-        Ddt_geom_q = (1.0 + quasar_data["zl"]) * Dl_q * Ds_q / Dls_q
+        Ddt_geom_q = tool.time_delay_distance(quasar_data["zl"], quasar_data["zs"], cosmo, n=20)
         N_q = len(quasar_data["zl"])
 
         t_obs = quasar_data["t_obs"]

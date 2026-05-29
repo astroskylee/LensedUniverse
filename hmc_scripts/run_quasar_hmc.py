@@ -105,8 +105,7 @@ block_id = np.concatenate(block_id_list)
 
 zl_j = jnp.asarray(z_lens)
 zs_j = jnp.asarray(z_src)
-Dl, Ds, Dls = tool.dldsdls(zl_j, zs_j, cosmo_true, n=20)
-Ddt_geom = (1.0 + zl_j) * Dl * Ds / Dls
+Ddt_geom = tool.time_delay_distance(zl_j, zs_j, cosmo_true, n=20)
 Ddt_geom = np.asarray(Ddt_geom)
 
 c_km_day = tool.c_km_s * 86400.0
@@ -267,8 +266,7 @@ def quasar_model(
         numpyro.sample("lambda_like", dist.Normal(lambda_true, lambda_err).mask(mst_mask), obs=lambda_obs)
         numpyro.sample("kappa_ext_like", dist.Normal(kappa_ext, kappa_ext_err), obs=kappa_ext_obs)
 
-    Dl, Ds, Dls = tool.dldsdls(zl, zs, cosmo, n=20)
-    Ddt_geom = (1.0 + zl) * Dl * Ds / Dls
+    Ddt_geom = tool.time_delay_distance(zl, zs, cosmo, n=20)
 
     with numpyro.plate("td_obs", zl.shape[0]):
         phi_true_scaled = numpyro.sample("phi_true_scaled", dist.Normal(phi_obs, phi_err))

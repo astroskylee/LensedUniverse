@@ -9,3 +9,4 @@ arviz
 numpyro
 getdist
 astropy
+CosmoDJ

@@ -1,11 +1,16 @@
 import jax
 import jax.numpy as jnp
-from jax import lax
 from jax.scipy.special import gammaln
 import numpy as np
 import pandas as pd
-from scipy.special import roots_legendre
 from scipy.stats import truncnorm
+
+from cosmodj import (
+    Planck18Cosmology,
+    angular_diameter_distance as cosmodj_angular_diameter_distance,
+    angular_diameter_distances as cosmodj_angular_diameter_distances,
+    time_delay_distance as cosmodj_time_delay_distance,
+)
 
 
 class tool:
@@ -17,121 +22,32 @@ class tool:
     pc = 3.0856776e+16
 
     @staticmethod
-    def func(z, Omegam, Omegak, w0, wa=0):
-        # Normalized Hubble parameter E(z) using the standard CPL dark-energy evolution.
-        Omegal = 1.0 - Omegam - Omegak
-        zp1 = 1.0 + z
-        de = zp1 ** (3.0 * (1.0 + w0 + wa)) * jnp.exp(-3.0 * wa * z / zp1)
-        Ez2 = Omegam * zp1 ** 3 + Omegak * zp1 ** 2 + Omegal * de
-        return Ez2 ** -0.5
-
-    @staticmethod
-    def nth_order_quad(n=20):
-        xval, weights = map(jnp.array, roots_legendre(n))
-        xval = xval.reshape(-1, 1)
-        weights = weights.reshape(-1, 1)
-
-        def integrate(func, a, b, *args):
-            return 0.5 * (b - a) * jnp.sum(
-                weights * func(0.5 * ((b - a) * xval + (b + a)), *args),
-                axis=0,
-            )
-
-        return integrate
-
-    @staticmethod
-    def integrate(func, a, b, *args, n=20):
-        # Public entry point; call tool.integrate directly.
-        quad = tool.nth_order_quad(n)
-        return quad(func, a, b, *args)
-
-    @staticmethod
-    def Dplus(Omegak, Es, El, zs, zl):
-        sqrt_ok = jnp.sqrt(jnp.abs(Omegak))
-        Ds = jnp.sinh(sqrt_ok * Es) / sqrt_ok / (1 + zs)
-        Dls = jnp.sinh(sqrt_ok * (Es - El)) / sqrt_ok / (1 + zs)
-        Dl = jnp.sinh(sqrt_ok * El) / sqrt_ok / (1 + zl)
-        return Dl, Ds, Dls
-
-    @staticmethod
-    def Dminus(Omegak, Es, El, zs, zl):
-        sqrt_ok = jnp.sqrt(jnp.abs(Omegak))
-        Ds = jnp.sin(sqrt_ok * Es) / sqrt_ok / (1 + zs)
-        Dls = jnp.sin(sqrt_ok * (Es - El)) / sqrt_ok / (1 + zs)
-        Dl = jnp.sin(sqrt_ok * El) / sqrt_ok / (1 + zl)
-        return Dl, Ds, Dls
-
-    @staticmethod
-    def Dflat(Es, El, zs, zl):
-        Ds = Es / (1 + zs)
-        Dls = (Es - El) / (1 + zs)
-        Dl = El / (1 + zl)
-        return Dl, Ds, Dls
-    #####################################################################################
-    @staticmethod
-    def Dpos(Omegak, E, z):
-        sqrt_ok = jnp.sqrt(jnp.abs(Omegak))
-        return jnp.sinh(sqrt_ok * E) / sqrt_ok / (1 + z)
-
-    @staticmethod
-    def Dneg(Omegak, E, z):
-        sqrt_ok = jnp.sqrt(jnp.abs(Omegak))
-        return jnp.sin(sqrt_ok * E) / sqrt_ok / (1 + z)
-
-    @staticmethod
-    def Dzero(E, z):
-        return E / (1 + z)
-    #####################################################################################
+    def _h0(cosmology):
+        if cosmology is None:
+            return Planck18Cosmology.H0
+        if hasattr(cosmology, "H0"):
+            return cosmology.H0
+        if "H0" in cosmology:
+            return cosmology["H0"]
+        return cosmology["h0"]
 
     @staticmethod
     def angular_diameter_distance(z, cosmology, n=20):
-        Omegam = cosmology["Omegam"]
-        Omegak = cosmology["Omegak"]
-        w0 = cosmology["w0"]
-        wa = cosmology["wa"]
-        h = cosmology["h0"]
-        E = tool.integrate(tool.func, 0, z, Omegam, Omegak, w0, wa, n=n)
-
-        Dl = lax.cond(
-            Omegak > 0,
-            lambda _: tool.Dpos(Omegak, E, z),
-            lambda _: lax.cond(
-                Omegak < 0,
-                lambda _: tool.Dneg(Omegak, E, z),
-                lambda _: tool.Dzero(E, z),
-                None,
-            ),
-            None,
-        )
-        return Dl * tool.c_km_s / h
+        return cosmodj_angular_diameter_distance(z, cosmology, n=n)
 
     @staticmethod
     def dldsdls(zl, zs, cosmology, n=20):
         """
-        Compute distances based on cosmological parameters.
+        Compute angular-diameter distances in Mpc.
+
         cosmology: dict, output of cosmology_model function.
         """
-        Omegam = cosmology["Omegam"]
-        Omegak = cosmology["Omegak"]
-        w0 = cosmology["w0"]
-        wa = cosmology["wa"]
-        h = cosmology["h0"]
+        return cosmodj_angular_diameter_distances(zl, zs, cosmology, n=n)
 
-        El = tool.integrate(tool.func, 0, zl, Omegam, Omegak, w0, wa, n=n)
-        Es = tool.integrate(tool.func, 0, zs, Omegam, Omegak, w0, wa, n=n)
-
-        Dl, Ds, Dls = lax.cond(
-            Omegak > 0,
-            lambda _: tool.Dplus(Omegak, Es, El, zs, zl),
-            lambda _: lax.cond(
-                Omegak < 0,
-                lambda _: tool.Dminus(Omegak, Es, El, zs, zl),
-                lambda _: tool.Dflat(Es, El, zs, zl),
-                None,
-            ),
-            None,
-        )
-        return Dl * tool.c_km_s / h, Ds * tool.c_km_s / h, Dls * tool.c_km_s / h
+    @staticmethod
+    def time_delay_distance(zl, zs, cosmology, n=20):
+        """Compute lensing time-delay distance in Mpc."""
+        return cosmodj_time_delay_distance(zl, zs, cosmology, n=n)
 
     def sigma_crit_jax(zl, zs, cosmology, n=20):
         # output is in Solar mass / pc**2
@@ -142,29 +58,16 @@ class tool:
     @staticmethod
     def compute_distances(zl, zs, cosmology, n=20):
         """
-        Compute distances based on cosmological parameters.
+        Compute dimensionless angular-diameter distances.
+
+        This preserves the historical slcosmo API used by the DSPL and model
+        likelihood code. Use dldsdls() when physical Mpc distances are needed.
+
         cosmology: dict, output of cosmology_model function.
         """
-        Omegam = cosmology["Omegam"]
-        Omegak = cosmology["Omegak"]
-        w0 = cosmology["w0"]
-        wa = cosmology["wa"]
-
-        El = tool.integrate(tool.func, 0, zl, Omegam, Omegak, w0, wa, n=n)
-        Es = tool.integrate(tool.func, 0, zs, Omegam, Omegak, w0, wa, n=n)
-
-        Dl, Ds, Dls = lax.cond(
-            Omegak > 0,
-            lambda _: tool.Dplus(Omegak, Es, El, zs, zl),
-            lambda _: lax.cond(
-                Omegak < 0,
-                lambda _: tool.Dminus(Omegak, Es, El, zs, zl),
-                lambda _: tool.Dflat(Es, El, zs, zl),
-                None,
-            ),
-            None,
-        )
-        return Dl, Ds, Dls
+        Dl, Ds, Dls = cosmodj_angular_diameter_distances(zl, zs, cosmology, n=n)
+        scale = tool._h0(cosmology) / tool.c_km_s
+        return Dl * scale, Ds * scale, Dls * scale
 
     @staticmethod
     def jgamma(n):

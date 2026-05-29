@@ -2,7 +2,7 @@ import jax.numpy as jnp, numpy as np, numpyro.distributions as dist, astropy.uni
 from MGE_jax import MGE
 from jax import random
 from numpyro.infer import MCMC, NUTS
-from astropy.cosmology import Planck18 as cosmo
+from cosmodj import Planck18Cosmology as cosmo
 from astropy import constants as const
 import jam_sph_proj, param_util
 from functools import partial
